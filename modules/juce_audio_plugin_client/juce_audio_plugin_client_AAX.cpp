@@ -1410,7 +1410,7 @@ class JuceAAX_Processor final
             return result;
         }
 
-        const uint32_t stateNum = m_updateStateCounter++; // member uint32_t
+        const auto stateNum = m_updateStateCounter++; // member uint32_t
 
         // Do whatever additional work is required to capture the current
         // parameter state and associate it with stateNum, for example
@@ -1442,7 +1442,7 @@ class JuceAAX_Processor final
     int64_t m_updateStateCounter = 0;
 
     std::map<std::string, std::pair<bool, double>> m_dirtyParamMap;
-    std::map<uint32_t, std::vector<std::pair<std::string, double>>>
+    std::map<int64_t, std::vector<std::pair<std::string, double>>>
       m_stateParamValues;
 
     AAX_Result GetParameterValueFromString(
@@ -2602,22 +2602,24 @@ class JuceAAX_Processor final
 
             const auto renderState = *i.renderStateCounter;
 
-            if (i.pluginInstance->parameters.m_stateParamValues.contains(
-                  renderState))
+            for (const auto& parameterUpdates :
+                 i.pluginInstance->parameters.m_stateParamValues)
             {
-                auto& paramUpdates =
-                  i.pluginInstance->parameters.m_stateParamValues.at(
-                    renderState);
+                if (parameterUpdates.first > renderState)
+                {
+                    continue;
+                }
 
-                for (const auto& entry : paramUpdates)
+                for (const auto& entry : parameterUpdates.second)
                 {
                     i.pluginInstance->parameters.setAudioProcessorParameter(
                       entry.first.data(), static_cast<float>(entry.second));
                 }
-
-                i.pluginInstance->parameters.m_stateParamValues.erase(
-                  renderState);
             }
+
+            std::erase_if(i.pluginInstance->parameters.m_stateParamValues,
+                          [=](const auto& entry)
+                          { return entry.first <= renderState; });
 
             int sideChainBufferIdx =
               i.pluginInstance->parameters.hasSidechain &&
