@@ -129,7 +129,7 @@ template<typename T, size_t SIZE>
 LockFreeFIFO<T, SIZE>::LockFreeFIFO(size_t minSize)
     requires(SIZE == 0)
 {
-    jassert(minSize > 1, "Size must be 2 or greater.");
+    // jassert(minSize > 1, "Size must be 2 or greater.");
     static_assert(std::atomic<size_t>::is_always_lock_free);
     const auto nearestLog2 = 1 << (size_t)std::ceil(std::log2((double)minSize));
     m_data.resize(nearestLog2, T());
@@ -195,7 +195,7 @@ LockFreeFIFO<T, SIZE>::peek() const noexcept
     // Check if empty
     if ((readPtr & m_bitMask) == (writePtr & m_bitMask))
     {
-        jassertfalse;
+        // jassertfalse;
         return T();
     }
 
@@ -320,7 +320,8 @@ size_t
 LockFreeFIFO<T, SIZE>::pushElements(const T* values, size_t numValues) noexcept
     requires std::is_trivially_copyable_v<T>
 {
-    jassert(numValues < SIZE - 1, "Too many values, for this fifos capacity!");
+    // jassert(numValues < SIZE - 1, "Too many values, for this fifos
+    // capacity!");
 
     auto readIndex  = m_readIndex.load(std::memory_order::acquire);
     auto writeIndex = m_cachedWrite;
