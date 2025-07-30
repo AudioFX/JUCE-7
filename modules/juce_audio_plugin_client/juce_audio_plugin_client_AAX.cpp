@@ -1383,6 +1383,12 @@ class JuceAAX_Processor final
         return result;
     }
 
+    struct ParamUpdateData
+    {
+        int64_t stateIndex;
+        std::vector<std::pair<std::string, double>> updatedParameters;
+    };
+
     AAX_Result UpdateParameterNormalizedValue(AAX_CParamID paramID,
                                               double value,
                                               AAX_EUpdateSource source) override
@@ -1429,7 +1435,11 @@ class JuceAAX_Processor final
             }
         }
 
-        m_stateParamValues[stateNum] = std::move(updatedParams);
+        ParamUpdateData data;
+        data.stateIndex        = stateNum;
+        data.updatedParameters = std::move(updatedParams);
+
+        m_updateFifo.pushElement(std::move(data));
 
         result = Controller()->PostPacket(
           AAX_FIELD_INDEX(JUCEAlgorithmContext, renderStateCounter),
@@ -1442,8 +1452,8 @@ class JuceAAX_Processor final
     int64_t m_updateStateCounter = 0;
 
     std::map<std::string, std::pair<bool, double>> m_dirtyParamMap;
-    std::map<int64_t, std::vector<std::pair<std::string, double>>>
-      m_stateParamValues;
+
+    detail::custom::LockFreeFIFO<ParamUpdateData> m_updateFifo{ 256 };
 
     AAX_Result GetParameterValueFromString(
       AAX_CParamID paramID,
@@ -2602,24 +2612,26 @@ class JuceAAX_Processor final
 
             const auto renderState = *i.renderStateCounter;
 
-            for (const auto& parameterUpdates :
-                 i.pluginInstance->parameters.m_stateParamValues)
+            auto& updatefifo = i.pluginInstance->parameters.m_updateFifo;
+
+            while (updatefifo.getSize() > 0)
             {
-                if (parameterUpdates.first > renderState)
+                const auto& entry = updatefifo.peek();
+
+                if (entry.stateIndex > renderState)
                 {
-                    continue;
+                    break;
                 }
 
-                for (const auto& entry : parameterUpdates.second)
+                for (const auto& paramInfo : entry.updatedParameters)
                 {
                     i.pluginInstance->parameters.setAudioProcessorParameter(
-                      entry.first.data(), static_cast<float>(entry.second));
+                      paramInfo.first.data(),
+                      static_cast<float>(paramInfo.second));
                 }
-            }
 
-            std::erase_if(i.pluginInstance->parameters.m_stateParamValues,
-                          [=](const auto& entry)
-                          { return entry.first <= renderState; });
+                updatefifo.popElement();
+            }
 
             int sideChainBufferIdx =
               i.pluginInstance->parameters.hasSidechain &&
