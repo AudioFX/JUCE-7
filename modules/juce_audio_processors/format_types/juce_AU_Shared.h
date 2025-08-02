@@ -179,6 +179,25 @@ struct AudioUnitHelpers
             return mutableBuffer;
         }
 
+        AudioBuffer<float>& getBuffer (UInt32 frames, UInt32 startFrame) noexcept
+        {
+            jassert (std::none_of (channels.begin(), channels.end(), [] (auto* x) { return x == nullptr; }));
+
+            const auto channelPtr = channels.empty() ? scratch.getArrayOfWritePointers() : channels.data();
+
+            tempChannels.clear();
+
+            const auto numChannels = channels.empty() ? scratch.getNumChannels(): channels.size();
+            for (int chan = 0; chan < numChannels; ++chan)
+            {
+              tempChannels.push_back(channelPtr[chan] + startFrame);
+            }
+
+            mutableBuffer.setDataToReferTo (tempChannels.data(), (int) channels.size(), static_cast<int> (frames));
+
+            return mutableBuffer;
+        }
+
         void set (int bus, AudioBufferList& bufferList, const int* channelMap) noexcept
         {
             if (bufferList.mNumberBuffers <= 0 || ! isPositiveAndBelow (bus, inputBusOffsets.size() - 1))
@@ -268,6 +287,7 @@ struct AudioUnitHelpers
         //==============================================================================
         AudioBuffer<float> scratch, mutableBuffer;
         std::vector<float*> channels;
+        std::vector<float*> tempChannels;
         std::vector<int> inputBusOffsets, outputBusOffsets;
     };
 

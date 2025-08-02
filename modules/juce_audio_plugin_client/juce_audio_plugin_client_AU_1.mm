@@ -1093,6 +1093,22 @@ public:
         return MusicDeviceBase::GetParameter (inID, inScope, inElement, outValue);
     }
 
+    struct ParamChangeData
+    {
+          ParamChangeData(AudioUnitParameterID id, Float32 value, UInt32 offset)
+          {
+            this->id = id;
+            this->newValue = value;
+            this->offset = offset;
+          }
+
+          AudioUnitParameterID id;
+          Float32 newValue;
+          UInt32 offset = 0;
+    };
+
+    std::vector<ParamChangeData> m_queuedParamChanges;
+
     ComponentResult SetParameter (AudioUnitParameterID inID,
                                   AudioUnitScope inScope,
                                   AudioUnitElement inElement,
@@ -1103,13 +1119,21 @@ public:
         {
             if (auto* param = getParameterForAUParameterID (inID))
             {
-                auto value = inValue / getMaximumParameterValue (param);
+                Float32 value = inValue / getMaximumParameterValue (param);
 
-                if (! approximatelyEqual (value, param->getValue()))
+                if (inBufferOffsetInFrames == 0)
                 {
-                    inParameterChangedCallback = true;
-                    param->setValueNotifyingHost (value);
+                    if (! approximatelyEqual (value, param->getValue()))
+                    {
+                        inParameterChangedCallback = true;
+                        param->setValueNotifyingHost (value);
+                    }
                 }
+                else
+                {
+                    m_queuedParamChanges.emplace_back(inID, value, inBufferOffsetInFrames);
+                }
+
 
                 return noErr;
             }
@@ -1386,6 +1410,7 @@ public:
         return err;
     }
 
+
     //==============================================================================
     ComponentResult Render (AudioUnitRenderActionFlags& ioActionFlags,
                             const AudioTimeStamp& inTimeStamp,
@@ -1401,6 +1426,8 @@ public:
         }
 
         ioActionFlags &= ~kAudioUnitRenderAction_OutputIsSilence;
+
+        std::sort(m_queuedParamChanges.begin(), m_queuedParamChanges.end(), [=](const ParamChangeData& l, const ParamChangeData& r){return l.offset > r.offset;});
 
         const int numInputBuses  = AudioUnitHelpers::getBusCount (*juceFilter, true);
         const int numOutputBuses = AudioUnitHelpers::getBusCount (*juceFilter, false);
@@ -1451,15 +1478,57 @@ public:
             audioBuffer.clearUnusedChannels ((int) nFrames);
         }
 
-        // swap midi buffers
+        int startSample = 0;
+        int samplesRemaining  = nFrames;
+        int samplesToProcess = samplesRemaining;
+        UInt32 updateOffset = -1;
+        while (samplesRemaining > 0)
         {
-            const ScopedLock sl (incomingMidiLock);
-            midiEvents.clear();
-            incomingEvents.swapWith (midiEvents);
+              if (!m_queuedParamChanges.empty())
+              {
+                const auto& nextChange = m_queuedParamChanges.back();
+                samplesToProcess = nextChange.offset - startSample;
+                updateOffset = nextChange.offset;
+              }
+
+            // update midi buffers
+            {
+                const ScopedLock sl (incomingMidiLock);
+                midiEvents.clear();
+                midiEvents.addEvents(incomingEvents, startSample, samplesToProcess, 0);
+                incomingEvents.clear (startSample, samplesToProcess);
+            }
+
+            // process audio
+            processBlock (audioBuffer.getBuffer (samplesToProcess, startSample), midiEvents);
+
+            samplesRemaining -= samplesToProcess;
+            startSample += samplesToProcess;
+
+            if (!m_queuedParamChanges.empty())
+            {
+                  while (!m_queuedParamChanges.empty() && m_queuedParamChanges.back().offset == updateOffset)
+                  {
+                        const auto& change = m_queuedParamChanges.back();
+
+                         if (auto* param = getParameterForAUParameterID (change.id))
+                        {
+                            Float32 value = change.newValue;
+
+                            if (! approximatelyEqual (value, param->getValue()))
+                            {
+                                inParameterChangedCallback = true;
+                                param->setValueNotifyingHost (value);
+                            }
+
+                        }
+
+                        m_queuedParamChanges.pop_back();
+                  }
+            }
         }
 
-        // process audio
-        processBlock (audioBuffer.getBuffer (nFrames), midiEvents);
+
 
         // copy back
         {
