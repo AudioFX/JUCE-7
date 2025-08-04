@@ -1484,12 +1484,16 @@ public:
         UInt32 updateOffset = -1;
         while (samplesRemaining > 0)
         {
-              if (!m_queuedParamChanges.empty())
-              {
-                const auto& nextChange = m_queuedParamChanges.back();
-                samplesToProcess = nextChange.offset - startSample;
+            if (!m_queuedParamChanges.empty())
+            {
+                auto& nextChange = m_queuedParamChanges.back();
+                samplesToProcess = std::min((int)nextChange.offset - startSample, samplesRemaining);
                 updateOffset = nextChange.offset;
-              }
+            }   
+            else
+            {
+                samplesToProcess = samplesRemaining;
+            }
 
             // update midi buffers
             {
