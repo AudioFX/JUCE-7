@@ -540,7 +540,7 @@ private:
                               0, maxAudioOutputChannels,
                               true,
                               (pluginHolder.processor.get() != nullptr && pluginHolder.processor->producesMidi()),
-                              true, false),
+                              false, false),
               shouldMuteLabel  ("Feedback Loop:", "Feedback Loop:"),
               shouldMuteButton ("Mute audio input")
         {
