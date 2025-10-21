@@ -40,6 +40,14 @@
  #define JUCE_HAS_IOS_HARDWARE_KEYBOARD_SUPPORT 0
 #endif
 
+#include <cmath>
+#include <limits>
+
+namespace
+{
+    constexpr int panGestureTouchIndex = 127;
+}
+
 namespace juce
 {
 
@@ -305,11 +313,13 @@ struct CADisplayLinkDeleter
 
 @end
 
-@interface JuceUIView : UIView<CALayerDelegate>
+@interface JuceUIView : UIView<CALayerDelegate, UIGestureRecognizerDelegate>
 {
 @public
     UIViewComponentPeer* owner;
     std::unique_ptr<CADisplayLink, CADisplayLinkDeleter> displayLink;
+    UIPinchGestureRecognizer* pinchGestureRecognizer;
+    UIPanGestureRecognizer* panGestureRecognizer;
 }
 
 - (JuceUIView*) initWithOwner: (UIViewComponentPeer*) owner withFrame: (CGRect) frame;
@@ -325,6 +335,8 @@ struct CADisplayLinkDeleter
 - (void) touchesMoved:     (NSSet*) touches  withEvent: (UIEvent*) event;
 - (void) touchesEnded:     (NSSet*) touches  withEvent: (UIEvent*) event;
 - (void) touchesCancelled: (NSSet*) touches  withEvent: (UIEvent*) event;
+- (void) onPinch: (UIPinchGestureRecognizer*) gesture;
+- (void) onPan: (UIPanGestureRecognizer*) gesture;
 
 #if JUCE_HAS_IOS_POINTER_SUPPORT
 - (void) onHover: (UIHoverGestureRecognizer*) gesture API_AVAILABLE (ios (13.0));
@@ -444,6 +456,8 @@ public:
     void updateScreenBounds();
 
     void handleTouches (UIEvent*, MouseEventFlags);
+    void onPinch (UIPinchGestureRecognizer*);
+    void onPan (UIPanGestureRecognizer*);
 
    #if JUCE_HAS_IOS_POINTER_SUPPORT
     API_AVAILABLE (ios (13.0)) void onHover (UIHoverGestureRecognizer*);
@@ -492,6 +506,10 @@ public:
     String stringBeingComposed;
     int startOfMarkedTextInTextInputTarget = 0;
     bool fullScreen = false, insideDrawRect = false;
+    bool pinchGestureActive = false;
+    float pinchGestureLastScale = 1.0f;
+    bool panGestureActive = false;
+    Point<float> panGestureLastTranslation;
     NSUniquePtr<JuceTextView> hiddenTextInput { [[JuceTextView alloc] initWithOwner: this] };
     NSUniquePtr<JuceTextInputTokenizer> tokenizer { [[JuceTextInputTokenizer alloc] initWithPeer: this] };
 
@@ -746,14 +764,32 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
         [hoverRecognizer setRequiresExclusiveTouchType: YES];
         [self addGestureRecognizer: hoverRecognizer];
 
-        auto panRecognizer = [[[UIPanGestureRecognizer alloc] initWithTarget: self action: @selector (onScroll:)] autorelease];
-        [panRecognizer setCancelsTouchesInView: NO];
-        [panRecognizer setRequiresExclusiveTouchType: YES];
-        [panRecognizer setAllowedScrollTypesMask: UIScrollTypeMaskAll];
-        [panRecognizer setMaximumNumberOfTouches: 0];
-        [self addGestureRecognizer: panRecognizer];
+        auto pointerPanRecognizer = [[[UIPanGestureRecognizer alloc] initWithTarget: self action: @selector (onScroll:)] autorelease];
+        [pointerPanRecognizer setCancelsTouchesInView: NO];
+        [pointerPanRecognizer setRequiresExclusiveTouchType: YES];
+        [pointerPanRecognizer setAllowedScrollTypesMask: UIScrollTypeMaskAll];
+        [pointerPanRecognizer setMaximumNumberOfTouches: 0];
+        [self addGestureRecognizer: pointerPanRecognizer];
     }
    #endif
+
+    pinchGestureRecognizer = [[UIPinchGestureRecognizer alloc] initWithTarget: self
+                                                                       action: @selector (onPinch:)];
+    [pinchGestureRecognizer setCancelsTouchesInView: NO];
+    [pinchGestureRecognizer setRequiresExclusiveTouchType: NO];
+    [pinchGestureRecognizer setDelegate: self];
+    [self addGestureRecognizer: pinchGestureRecognizer];
+    [pinchGestureRecognizer release];
+
+    panGestureRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget: self
+                                                                   action: @selector (onPan:)];
+    [panGestureRecognizer setCancelsTouchesInView: NO];
+    [panGestureRecognizer setRequiresExclusiveTouchType: NO];
+    [panGestureRecognizer setMinimumNumberOfTouches: 2];
+    [panGestureRecognizer setMaximumNumberOfTouches: 2];
+    [panGestureRecognizer setDelegate: self];
+    [self addGestureRecognizer: panGestureRecognizer];
+    [panGestureRecognizer release];
 
     return self;
 }
@@ -856,6 +892,28 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
         owner->handleTouches (event, MouseEventFlags::upAndCancel);
 
     [self touchesEnded: touches withEvent: event];
+}
+
+- (void) onPinch: (UIPinchGestureRecognizer*) gesture
+{
+    if (owner != nullptr)
+        owner->onPinch (gesture);
+}
+
+- (void) onPan: (UIPanGestureRecognizer*) gesture
+{
+    if (owner != nullptr)
+        owner->onPan (gesture);
+}
+
+- (BOOL) gestureRecognizer: (UIGestureRecognizer*) gestureRecognizer
+        shouldRecognizeSimultaneouslyWithGestureRecognizer: (UIGestureRecognizer*) otherGestureRecognizer
+{
+    if ((gestureRecognizer == pinchGestureRecognizer && otherGestureRecognizer == panGestureRecognizer)
+        || (gestureRecognizer == panGestureRecognizer && otherGestureRecognizer == pinchGestureRecognizer))
+        return YES;
+
+    return NO;
 }
 
 #if JUCE_HAS_IOS_POINTER_SUPPORT
@@ -2092,6 +2150,120 @@ void UIViewComponentPeer::handleTouches (UIEvent* event, MouseEventFlags mouseEv
             if (! isValidPeer (this))
                 return;
         }
+    }
+}
+
+void UIViewComponentPeer::onPinch (UIPinchGestureRecognizer* gesture)
+{
+    if (gesture == nullptr)
+        return;
+
+    const auto gestureState = [gesture state];
+    const auto currentScale = (float) [gesture scale];
+
+    if (gestureState == UIGestureRecognizerStateBegan)
+    {
+        pinchGestureActive = true;
+        pinchGestureLastScale = currentScale;
+        return;
+    }
+
+    if (! pinchGestureActive)
+    {
+        pinchGestureActive = true;
+        pinchGestureLastScale = currentScale;
+    }
+
+    if (gestureState == UIGestureRecognizerStateChanged)
+    {
+        if (pinchGestureLastScale > 0.0f && currentScale > 0.0f)
+        {
+            const auto deltaScale = currentScale / pinchGestureLastScale;
+
+            if (std::abs (deltaScale - 1.0f) > std::numeric_limits<float>::epsilon())
+            {
+                const auto location = convertToPointFloat ([gesture locationInView: view]);
+                const auto time = UIViewComponentPeer::getMouseTime ([[NSProcessInfo processInfo] systemUptime]);
+
+                handleMagnifyGesture (MouseInputSource::InputSourceType::touch,
+                                      location,
+                                      time,
+                                      deltaScale);
+            }
+        }
+
+        pinchGestureLastScale = currentScale;
+        return;
+    }
+
+    if (   gestureState == UIGestureRecognizerStateEnded
+        || gestureState == UIGestureRecognizerStateCancelled
+        || gestureState == UIGestureRecognizerStateFailed)
+    {
+        pinchGestureActive = false;
+        pinchGestureLastScale = 1.0f;
+    }
+}
+
+void UIViewComponentPeer::onPan (UIPanGestureRecognizer* gesture)
+{
+    if (gesture == nullptr)
+        return;
+
+    const auto gestureState = [gesture state];
+    const auto translation = [gesture translationInView: view];
+    const Point<float> currentTranslation ((float) translation.x, (float) translation.y);
+
+    if (gestureState == UIGestureRecognizerStateBegan)
+    {
+        panGestureActive = true;
+        panGestureLastTranslation = currentTranslation;
+        return;
+    }
+
+    if (! panGestureActive)
+    {
+        panGestureActive = true;
+        panGestureLastTranslation = currentTranslation;
+    }
+
+    const Point<float> delta = currentTranslation - panGestureLastTranslation;
+
+    if (   gestureState == UIGestureRecognizerStateChanged
+        || gestureState == UIGestureRecognizerStateEnded
+        || gestureState == UIGestureRecognizerStateCancelled
+        || gestureState == UIGestureRecognizerStateFailed)
+    {
+        if (std::abs (delta.x) > std::numeric_limits<float>::epsilon()
+            || std::abs (delta.y) > std::numeric_limits<float>::epsilon())
+        {
+            MouseWheelDetails details;
+            details.deltaX = delta.x;
+            details.deltaY = delta.y;
+            details.isReversed = false;
+            details.isSmooth = true;
+            details.isInertial = false;
+
+            const auto location = convertToPointFloat ([gesture locationInView: view]);
+            const auto time = UIViewComponentPeer::getMouseTime ([[NSProcessInfo processInfo] systemUptime]);
+
+            handleMouseWheel (MouseInputSource::InputSourceType::touch,
+                              location,
+                              time,
+                              details,
+                              panGestureTouchIndex);
+        }
+
+        panGestureLastTranslation = currentTranslation;
+    }
+
+    if (   gestureState == UIGestureRecognizerStateEnded
+        || gestureState == UIGestureRecognizerStateCancelled
+        || gestureState == UIGestureRecognizerStateFailed)
+    {
+        panGestureActive = false;
+        panGestureLastTranslation = {};
+        [gesture setTranslation: CGPointZero inView: view];
     }
 }
 
