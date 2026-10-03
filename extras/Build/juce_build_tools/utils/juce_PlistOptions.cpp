@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -143,6 +152,9 @@ namespace juce::build_tools
         if (bluetoothPermissionEnabled)
             addPlistDictionaryKey (*dict, "NSBluetoothAlwaysUsageDescription", bluetoothPermissionText);
 
+        if (localNetworkPermissionEnabled)
+            addPlistDictionaryKey (*dict, "NSLocalNetworkUsageDescription", localNetworkPermissionText);
+
         if (iOS)
         {
             if (bluetoothPermissionEnabled)
@@ -153,6 +165,15 @@ namespace juce::build_tools
 
             if (shouldAddStoryboardToProject)
                 addPlistDictionaryKey (*dict, "UILaunchStoryboardName", storyboardName);
+
+            XmlElement sceneManifestKey ("key");
+            sceneManifestKey.addTextElement ("UIApplicationSceneManifest");
+            dict->addChildElement (new XmlElement (sceneManifestKey));
+
+            auto* sceneManifestDict = dict->createNewChildElement ("dict");
+            addPlistDictionaryKey (*sceneManifestDict, "UIApplicationSupportsMultipleScenes", false);
+            addKeyIfNotFound (*sceneManifestDict, "UISceneConfigurations");
+            sceneManifestDict->createNewChildElement ("dict");
         }
         else
         {
@@ -163,7 +184,12 @@ namespace juce::build_tools
         addPlistDictionaryKey (*dict, "CFBundleExecutable",          executableName);
 
         if (! iOS) // (NB: on iOS this causes error ITMS-90032 during publishing)
+        {
             addPlistDictionaryKey (*dict, "CFBundleIconFile", iconFile.exists() ? iconFile.getFileName() : String());
+
+            if (iconComposerIcon.exists())
+                addPlistDictionaryKey (*dict, "CFBundleIconName", iconComposerIcon.getFileNameWithoutExtension());
+        }
 
         addPlistDictionaryKey (*dict, "CFBundleIdentifier",          bundleIdentifier);
         addPlistDictionaryKey (*dict, "CFBundleName",                projectName);
@@ -203,7 +229,7 @@ namespace juce::build_tools
 
                     addPlistDictionaryKey (*dict2, "CFBundleTypeName", ex);
                     addPlistDictionaryKey (*dict2, "CFBundleTypeRole", "Editor");
-                    addPlistDictionaryKey (*dict2, "CFBundleTypeIconFile", "Icon");
+                    addPlistDictionaryKey (*dict2, "CFBundleTypeIconFile", iconFile.getFileNameWithoutExtension());
                     addPlistDictionaryKey (*dict2, "NSPersistentStoreTypeKey", "XML");
                     addPlistDictionaryKey (*dict2, "LSHandlerRank", "Default");
                 }
@@ -348,6 +374,8 @@ namespace juce::build_tools
         plistEntry.createNewChildElement ("key")->addTextElement ("NSExtensionAttributes");
 
         auto* dict = plistEntry.createNewChildElement ("dict");
+        addPlistDictionaryKey (*dict, "AudioComponentBundle", auv3FrameworkBundle);
+
         dict->createNewChildElement ("key")->addTextElement ("AudioComponents");
         auto* componentArray = dict->createNewChildElement ("array");
 

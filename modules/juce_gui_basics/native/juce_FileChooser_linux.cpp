@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -199,7 +208,7 @@ private:
         }
 
         args.add (startPath.getFullPathName());
-        args.add ("(" + owner.filters.replaceCharacter (';', ' ') + ")");
+        args.add ("(" + owner.filters.replaceCharacter (';', ' ').trim() + ")");
     }
 
     void addZenityArgs()
@@ -207,17 +216,29 @@ private:
         args.add ("zenity");
         args.add ("--file-selection");
 
-        const auto getUnderstandsConfirmOverwrite = []
+        const auto zenityVersion = std::invoke ([]
         {
-            // --confirm-overwrite is deprecated in zenity 3.91 and higher
             ChildProcess process;
             process.start ("zenity --version");
             process.waitForProcessToFinish (1000);
             const auto versionString = process.readAllProcessOutput();
             const auto version = StringArray::fromTokens (versionString.trim(), ".", "");
-            return version.size() >= 2
-                   && (version[0].getIntValue() < 3
-                       || (version[0].getIntValue() == 3 && version[1].getIntValue() < 91));
+
+            std::array<int, 3> versionArray{};
+
+            for (int i = 0; i < std::min (version.size(), 3); ++i)
+                versionArray[(size_t) i] = version[i].getIntValue();
+
+            return versionArray;
+        });
+
+        const auto getUnderstandsConfirmOverwrite = [zenityVersion]
+        {
+            if (zenityVersion == std::array<int, 3>{})
+                return false;
+
+            // --confirm-overwrite is deprecated in zenity 3.91 and higher
+            return zenityVersion < std::array<int, 3> { 3, 91 };
         };
 
         if (warnAboutOverwrite && getUnderstandsConfirmOverwrite())
@@ -245,23 +266,48 @@ private:
         {
             StringArray tokens;
             tokens.addTokens (owner.filters, ";,|", "\"");
+            tokens.removeEmptyStrings();
 
             args.add ("--file-filter=" + tokens.joinIntoString (" "));
         }
 
-        if (owner.startingFile.isDirectory())
-            owner.startingFile.setAsCurrentWorkingDirectory();
-        else if (owner.startingFile.getParentDirectory().exists())
-            owner.startingFile.getParentDirectory().setAsCurrentWorkingDirectory();
-        else
-            File::getSpecialLocation (File::userHomeDirectory).setAsCurrentWorkingDirectory();
+        // When a directory is specified for the --filename argument older zenity versions
+        // e.g. 4.0.1 will not enter this directory, but display it as a selected directory inside
+        // the parent directory. This is the case even if the argument ends with '/'.
+        //
+        // This workaround will enter the directory. This workaround completely breaks with version
+        // 4.2.1 and fails to select a starting location entirely. On the upside, 4.2.1 will enter
+        // the directory if the filename argument ends with '/'.
+        const auto pre421WorkaroundToEnterStartingDirectory = [&]
+        {
+            if (owner.startingFile.isDirectory())
+                owner.startingFile.setAsCurrentWorkingDirectory();
+            else if (owner.startingFile.getParentDirectory().exists())
+                owner.startingFile.getParentDirectory().setAsCurrentWorkingDirectory();
+            else
+                File::getSpecialLocation (File::userHomeDirectory).setAsCurrentWorkingDirectory();
 
-        auto filename = owner.startingFile.getFileName();
+            return owner.startingFile.getFileName();
+        };
+
+        const auto getFilename = [&]() -> String
+        {
+            if (owner.startingFile.isDirectory())
+                return File::addTrailingSeparator (owner.startingFile.getFullPathName());
+
+            if (owner.startingFile.getParentDirectory().exists())
+                return owner.startingFile.getFullPathName();
+
+            return {};
+        };
+
+        const auto filename = zenityVersion < std::array<int, 3> { 4, 1, 2 } ? pre421WorkaroundToEnterStartingDirectory()
+                                                                             : getFilename();
 
         if (! filename.isEmpty())
             args.add ("--filename=" + filename);
 
-        // supplying the window ID of the topmost window makes sure that Zenity pops up..
+        // supplying the window ID of the topmost window makes sure that Zenity pops up
         if (uint64 topWindowID = getTopWindowID())
             setenv ("WINDOWID", String (topWindowID).toRawUTF8(), true);
     }

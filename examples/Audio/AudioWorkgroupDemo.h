@@ -1,18 +1,22 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE examples.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework examples.
+   Copyright (c) Raw Material Software Limited
 
    The code included in this file is provided under the terms of the ISC license
    http://www.isc.org/downloads/software-support-policy/isc-license. Permission
-   To use, copy, modify, and/or distribute this software for any purpose with or
+   to use, copy, modify, and/or distribute this software for any purpose with or
    without fee is hereby granted provided that the above copyright notice and
    this permission notice appear in all copies.
 
-   THE SOFTWARE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES,
-   WHETHER EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR
-   PURPOSE, ARE DISCLAIMED.
+   THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+   REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+   AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+   INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+   LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+   OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+   PERFORMANCE OF THIS SOFTWARE.
 
   ==============================================================================
 */
@@ -32,7 +36,7 @@
  dependencies:     juce_audio_basics, juce_audio_devices, juce_audio_formats,
                    juce_audio_processors, juce_audio_utils, juce_core,
                    juce_data_structures, juce_events, juce_graphics,
-                   juce_gui_basics, juce_gui_extra
+                   juce_gui_basics, juce_gui_extra, juce_audio_processors_headless
  exporters:        xcode_mac, xcode_iphone
 
  moduleFlags:      JUCE_STRICT_REFCOUNTEDPOINTER=1
@@ -55,48 +59,6 @@
 constexpr auto NumWorkerThreads = 4;
 
 //==============================================================================
-class ThreadBarrier : public ReferenceCountedObject
-{
-public:
-    using Ptr = ReferenceCountedObjectPtr<ThreadBarrier>;
-
-    static Ptr make (int numThreadsToSynchronise)
-    {
-        return { new ThreadBarrier { numThreadsToSynchronise } };
-    }
-
-    void arriveAndWait()
-    {
-        std::unique_lock lk { mutex };
-
-        [[maybe_unused]] const auto c = ++blockCount;
-
-        // You've tried to synchronise too many threads!!
-        jassert (c <= threadCount);
-
-        if (blockCount == threadCount)
-        {
-            blockCount = 0;
-            cv.notify_all();
-            return;
-        }
-
-        cv.wait (lk, [this] { return blockCount == 0; });
-    }
-
-private:
-    std::mutex mutex;
-    std::condition_variable cv;
-    int blockCount{};
-    const int threadCount{};
-
-    explicit ThreadBarrier (int numThreadsToSynchronise)
-        : threadCount (numThreadsToSynchronise) {}
-
-    JUCE_DECLARE_NON_COPYABLE (ThreadBarrier)
-    JUCE_DECLARE_NON_MOVEABLE (ThreadBarrier)
-};
-
 struct Voice
 {
     struct Oscillator
@@ -187,7 +149,8 @@ struct Voice
         workBuffer.applyGain (0.25f);
     }
 
-    const AudioSampleBuffer& getWorkBuffer() const { return workBuffer; }
+    const AudioSampleBuffer& getWorkBuffer() const& { return workBuffer; }
+    const AudioSampleBuffer& getWorkBuffer() const&& = delete;
 
     ADSR adsr;
     double sampleRate;
@@ -208,7 +171,6 @@ struct AudioWorkerThreadOptions
     int numSamples;
     double sampleRate;
     AudioWorkgroup workgroup;
-    ThreadBarrier::Ptr completionBarrier;
 };
 
 class AudioWorkerThread final : private Thread
@@ -221,20 +183,27 @@ public:
         : Thread ("AudioWorkerThread"),
           options (workerOptions)
     {
-        jassert (options.completionBarrier != nullptr);
-
        #if defined (JUCE_MAC)
         jassert (options.workgroup);
        #endif
 
-        startRealtimeThread (RealtimeOptions{}.withApproximateAudioProcessingTime (options.numSamples, options.sampleRate));
+        if (! startRealtimeThread (RealtimeOptions{}.withApproximateAudioProcessingTime (options.numSamples, options.sampleRate))
+            && ! startThread (Priority::high))
+        {
+            state = State::exit;
+        }
     }
 
-    ~AudioWorkerThread() override { stop(); }
+    ~AudioWorkerThread() final
+    {
+        {
+            const std::scoped_lock lock { mutex };
+            state = State::exit;
+            condvar.notify_one();
+        }
 
-    using Thread::notify;
-    using Thread::signalThreadShouldExit;
-    using Thread::isThreadRunning;
+        stopThread (-1);
+    }
 
     int getJobCount() const { return lastJobCount; }
 
@@ -250,37 +219,67 @@ public:
         return write.blockSize1 + write.blockSize2;
     }
 
-private:
-    void stop()
+    void signalWorkReady()
     {
-        signalThreadShouldExit();
-        stopThread (-1);
+        const std::scoped_lock lock { mutex };
+
+        if (state == State::exit)
+            return;
+
+        state = State::workInQueue;
+        condvar.notify_one();
     }
 
-    void run() override
+    void blockUntilCycleDone()
+    {
+        std::unique_lock lock { mutex };
+        condvar.wait (lock, [&] { return state == State::idle || state == State::exit; });
+    }
+
+private:
+    void run() final
     {
         WorkgroupToken token;
 
         options.workgroup.join (token);
 
-        while (wait (-1) && ! threadShouldExit())
+        while (true)
         {
-            const auto numReady = jobQueueFifo.getNumReady();
-            lastJobCount = numReady;
-
-            if (numReady > 0)
             {
-                jobQueueFifo.read (jobQueueFifo.getNumReady())
-                            .forEach ([this] (int srcIndex)
-                            {
-                                jobQueue[(size_t) srcIndex]->run();
-                            });
+                std::unique_lock lock { mutex };
+                condvar.wait (lock, [&] { return state != State::idle; });
+
+                if (state == State::exit)
+                    return;
+
+                state = State::active;
             }
 
-            // Wait for all our threads to get to this point.
-            options.completionBarrier->arriveAndWait();
+            const auto jobs = jobQueueFifo.read (jobQueueFifo.getNumReady());
+            lastJobCount = jobs.blockSize1 + jobs.blockSize2;
+            jobs.forEach ([this] (int srcIndex)
+                          {
+                              jobQueue[(size_t) srcIndex]->run();
+                          });
+
+            {
+                const std::scoped_lock lock { mutex };
+
+                if (state == State::active)
+                    state = State::idle;
+
+                condvar.notify_one();
+            }
         }
     }
+
+    enum class State
+    {
+        idle,
+        workInQueue,
+        active,
+        exit,
+    };
 
     static constexpr auto numJobs = 128;
 
@@ -289,7 +288,10 @@ private:
     AbstractFifo jobQueueFifo { numJobs };
     std::atomic<int> lastJobCount = 0;
 
-private:
+    std::mutex mutex;
+    std::condition_variable condvar;
+    State state = State::idle;
+
     JUCE_DECLARE_NON_COPYABLE (AudioWorkerThread)
     JUCE_DECLARE_NON_MOVEABLE (AudioWorkerThread)
 };
@@ -297,7 +299,7 @@ private:
 template <typename ValueType, typename LockType>
 struct SharedThreadValue
 {
-    SharedThreadValue (LockType& lockRef, ValueType initialValue = {})
+    SharedThreadValue (LockType& lockRef, ValueType initialValue)
         : lock (lockRef),
           preSyncValue (initialValue),
           postSyncValue (initialValue)
@@ -355,8 +357,9 @@ public:
             voice.reset (new Voice { numSamples, sampleRate });
     }
 
-    void process (ThreadBarrier::Ptr barrier, Span<AudioWorkerThread*> workers,
-                  AudioSampleBuffer& buffer, MidiBuffer& midiBuffer)
+    void process (Span<AudioWorkerThread*> workers,
+                  AudioSampleBuffer& buffer,
+                  MidiBuffer& midiBuffer)
     {
         const auto blockThickness = thickness.get();
         const auto blockEnvelope = envelope.get();
@@ -403,6 +406,8 @@ public:
         // You could also do some of the work on this thread instead of waiting.
         for (int i = 0; i < (int) activeVoices.size();)
         {
+            const auto initialCount = i;
+
             for (auto worker : workers)
             {
                 if (i >= (int) activeVoices.size())
@@ -411,14 +416,18 @@ public:
                 const auto jobCount = jmin (jobsPerThread, (int) activeVoices.size() - i);
                 i += worker->queueAudioJobs ({ activeVoices.data() + i, (size_t) jobCount });
             }
+
+            // All voice input fifos are full, so drop additional work
+            if (i == initialCount)
+                break;
         }
 
         // kick off the work.
         for (auto& worker : workers)
-            worker->notify();
+            worker->signalWorkReady();
 
-        // Wait for our jobs to complete.
-        barrier->arriveAndWait();
+        for (auto& worker : workers)
+            worker->blockUntilCycleDone();
 
         // mix the jobs into the main audio thread buffer.
         for (auto* voice : activeVoices)
@@ -563,8 +572,6 @@ public:
     //==============================================================================
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
     {
-        completionBarrier = ThreadBarrier::make ((int) NumWorkerThreads + 1);
-
         const auto numChannels = 2;
         const auto workerOptions = AudioWorkerThreadOptions
         {
@@ -572,7 +579,6 @@ public:
             samplesPerBlockExpected,
             sampleRate,
             audioDeviceManager.getDeviceAudioWorkgroup(),
-            completionBarrier,
         };
 
         {
@@ -610,7 +616,7 @@ public:
         std::transform (workerThreads.begin(), workerThreads.end(), workers,
                         [] (auto& worker) { return worker.get(); });
 
-        synthesizer.process (completionBarrier, Span { workers }, *bufferToFill.buffer, midiBuffer);
+        synthesizer.process (Span { workers }, *bufferToFill.buffer, midiBuffer);
 
         // LiveAudioScrollingDisplay applies a 10x gain to the input signal, we need to reduce the gain on our signal.
         waveformBuffer.copyFrom (0, 0,
@@ -650,7 +656,6 @@ private:
     Label                     voiceCountLabel;
 
     SpinLock                  threadArrayUiLock;
-    ThreadBarrier::Ptr        completionBarrier;
 
     std::array<std::unique_ptr<Label>, NumWorkerThreads> threadLabels;
     std::array<AudioWorkerThread::Ptr, NumWorkerThreads> workerThreads;

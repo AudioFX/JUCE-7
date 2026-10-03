@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -26,7 +35,12 @@
 namespace juce
 {
 
-JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
+JUCE_BEGIN_IGNORE_DEPRECATION_WARNINGS
+
+bool OpenGLHelpers::isOpenGLES()
+{
+    return false;
+}
 
 class OpenGLContext::NativeContext
 {
@@ -35,10 +49,18 @@ public:
                    const OpenGLPixelFormat& pixFormat,
                    void* contextToShare,
                    bool shouldUseMultisampling,
-                   OpenGLVersion version)
+                   [[maybe_unused]] API apiIn,
+                   Version versionIn,
+                   Profile profileIn)
         : owner (component)
     {
-        const auto attribs = createAttribs (version, pixFormat, shouldUseMultisampling);
+        // OpenGL ES is not supported on macOS
+        jassert (apiIn == API::openGL);
+
+        const auto attribs = createAttribs (versionIn,
+                                            profileIn,
+                                            pixFormat,
+                                            shouldUseMultisampling);
 
         NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes: attribs.data()];
 
@@ -74,23 +96,34 @@ public:
         [view release];
     }
 
-    static std::vector<NSOpenGLPixelFormatAttribute> createAttribs (OpenGLVersion version,
+    static std::vector<NSOpenGLPixelFormatAttribute> createAttribs (Version version,
+                                                                    Profile profile,
                                                                     const OpenGLPixelFormat& pixFormat,
                                                                     bool shouldUseMultisampling)
     {
+        const auto versionEnum = std::invoke ([&]
+        {
+            if (version == Version { 3, 2 })
+            {
+                // Only the core profile is supported for OpenGL 3.2
+                jassert (profile == Profile::core);
+                return NSOpenGLProfileVersion3_2Core;
+            }
+
+            if (version != Version{} && profile != Profile::compatibility)
+            {
+                return NSOpenGLProfileVersion4_1Core;
+            }
+
+            // Using the default legacy compatibility context, even though the core profile
+            // was requested.
+            jassert (profile == Profile::compatibility);
+            return NSOpenGLProfileVersionLegacy;
+        });
+
         std::vector<NSOpenGLPixelFormatAttribute> attribs
         {
-            NSOpenGLPFAOpenGLProfile, [version]
-            {
-                if (version == openGL3_2)
-                    return NSOpenGLProfileVersion3_2Core;
-
-                if (version != defaultGLVersion)
-                    if (@available (macOS 10.10, *))
-                        return NSOpenGLProfileVersion4_1Core;
-
-                return NSOpenGLProfileVersionLegacy;
-            }(),
+            NSOpenGLPFAOpenGLProfile, versionEnum,
             NSOpenGLPFADoubleBuffer,
             NSOpenGLPFAClosestPolicy,
             NSOpenGLPFANoRecovery,
@@ -205,14 +238,14 @@ public:
         lastSwapTime = now;
     }
 
-    void updateWindowPosition (Rectangle<int>)
+    void updateWindowPosition()
     {
         if (auto* peer = owner.getTopLevelComponent()->getPeer())
         {
             const auto newArea = peer->getAreaCoveredBy (owner);
 
             if (convertToRectInt ([view frame]) != newArea)
-                [view setFrame: makeNSRect (newArea)];
+                [view setFrame: makeCGRect (newArea)];
         }
     }
 
@@ -300,10 +333,30 @@ public:
     {
         MouseForwardingNSOpenGLViewClass()  : ObjCClass ("JUCEGLView_")
         {
-            addMethod (@selector (rightMouseDown:),       [] (id self, SEL, NSEvent* ev)     { [[(NSOpenGLView*) self superview] rightMouseDown: ev]; });
-            addMethod (@selector (rightMouseUp:),         [] (id self, SEL, NSEvent* ev)     { [[(NSOpenGLView*) self superview] rightMouseUp:   ev]; });
-            addMethod (@selector (acceptsFirstMouse:),    [] (id, SEL, NSEvent*) -> BOOL     { return YES; });
-            addMethod (@selector (accessibilityHitTest:), [] (id self, SEL, NSPoint p) -> id { return [[(NSOpenGLView*) self superview] accessibilityHitTest: p]; });
+            addMethod (@selector (rightMouseDown:), [] (id self, SEL, NSEvent* ev)
+            {
+                [[(NSOpenGLView*) self superview] rightMouseDown: ev];
+            });
+
+            addMethod (@selector (rightMouseUp:), [] (id self, SEL, NSEvent* ev)
+            {
+                [[(NSOpenGLView*) self superview] rightMouseUp:   ev];
+            });
+
+            addMethod (@selector (acceptsFirstMouse:), [] (id, SEL, NSEvent*) -> BOOL
+            {
+                return YES;
+            });
+
+            addMethod (@selector (accessibilityHitTest:), [] (id self, SEL, NSPoint p) -> id
+            {
+                return [[(NSOpenGLView*) self superview] accessibilityHitTest: p];
+            });
+
+            addMethod (@selector (hitTest:), [] (id, SEL, NSPoint) -> NSView*
+            {
+                return nil;
+            });
 
             registerClass();
         }
@@ -318,6 +371,6 @@ bool OpenGLHelpers::isContextActive()
     return CGLGetCurrentContext() != CGLContextObj();
 }
 
-JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+JUCE_END_IGNORE_DEPRECATION_WARNINGS
 
 } // namespace juce

@@ -1,31 +1,39 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
 
 #pragma once
 
-#include "../Application/UserAccount/jucer_LicenseController.h"
 #include "Modules/jucer_AvailableModulesList.h"
 
 class ProjectExporter;
@@ -41,7 +49,6 @@ namespace ProjectMessages
 
         DECLARE_ID (projectMessages);
 
-        DECLARE_ID (incompatibleLicense);
         DECLARE_ID (cppStandard);
         DECLARE_ID (moduleNotFound);
         DECLARE_ID (jucePath);
@@ -52,6 +59,9 @@ namespace ProjectMessages
         DECLARE_ID (pluginCodeInvalid);
         DECLARE_ID (manufacturerCodeInvalid);
         DECLARE_ID (deprecatedExporter);
+        DECLARE_ID (unsupportedArm32Config);
+        DECLARE_ID (arm64Warning);
+        DECLARE_ID (lv2PaceProtectionWarning);
 
         DECLARE_ID (notification);
         DECLARE_ID (warning);
@@ -63,15 +73,18 @@ namespace ProjectMessages
 
     inline Identifier getTypeForMessage (const Identifier& message)
     {
-        static Identifier warnings[] = { Ids::incompatibleLicense, Ids::cppStandard, Ids::moduleNotFound,
-                                         Ids::jucePath, Ids::jucerFileModified, Ids::missingModuleDependencies,
+        static Identifier warnings[] = { Ids::cppStandard, Ids::moduleNotFound, Ids::jucePath,
+                                         Ids::jucerFileModified, Ids::missingModuleDependencies,
                                          Ids::oldProjucer, Ids::pluginCodeInvalid, Ids::manufacturerCodeInvalid,
-                                         Ids::deprecatedExporter };
+                                         Ids::deprecatedExporter, Ids::unsupportedArm32Config, Ids::arm64Warning,
+                                         Ids::lv2PaceProtectionWarning };
 
         if (std::find (std::begin (warnings), std::end (warnings), message) != std::end (warnings))
             return Ids::warning;
 
-        if (message == Ids::newVersionAvailable)
+        static Identifier notifications[] = { Ids::newVersionAvailable };
+
+        if (std::find (std::begin (notifications), std::end (notifications), message) != std::end (notifications))
             return Ids::notification;
 
         jassertfalse;
@@ -80,7 +93,6 @@ namespace ProjectMessages
 
     inline String getTitleForMessage (const Identifier& message)
     {
-        if (message == Ids::incompatibleLicense)        return "Incompatible License and Splash Screen Setting";
         if (message == Ids::cppStandard)                return "C++ Standard";
         if (message == Ids::moduleNotFound)             return "Module Not Found";
         if (message == Ids::jucePath)                   return "JUCE Path";
@@ -91,6 +103,9 @@ namespace ProjectMessages
         if (message == Ids::pluginCodeInvalid)          return "Invalid Plugin Code";
         if (message == Ids::manufacturerCodeInvalid)    return "Invalid Manufacturer Code";
         if (message == Ids::deprecatedExporter)         return "Deprecated Exporter";
+        if (message == Ids::unsupportedArm32Config)     return "Unsupported Architecture";
+        if (message == Ids::arm64Warning)               return "Prefer arm64ec over arm64";
+        if (message == Ids::lv2PaceProtectionWarning)   return "LV2 Plugin Format Not Supported by PACE";
 
         jassertfalse;
         return {};
@@ -98,7 +113,6 @@ namespace ProjectMessages
 
     inline String getDescriptionForMessage (const Identifier& message)
     {
-        if (message == Ids::incompatibleLicense)        return "Save and export is disabled.";
         if (message == Ids::cppStandard)                return "Module(s) have a higher C++ standard requirement than the project.";
         if (message == Ids::moduleNotFound)             return "Module(s) could not be found at the specified paths.";
         if (message == Ids::jucePath)                   return "The path to your JUCE folder is incorrect.";
@@ -109,6 +123,9 @@ namespace ProjectMessages
         if (message == Ids::pluginCodeInvalid)          return "The plugin code should be exactly four characters in length.";
         if (message == Ids::manufacturerCodeInvalid)    return "The manufacturer code should be exactly four characters in length.";
         if (message == Ids::deprecatedExporter)         return "The project includes a deprecated exporter.";
+        if (message == Ids::unsupportedArm32Config)     return "The project includes a Visual Studio configuration that uses the 32-bit Arm architecture, which is no longer supported. This configuration has been hidden, and will be removed on save.";
+        if (message == Ids::arm64Warning)               return "For software where interoperability is a concern (such as plugins and hosts), arm64ec will provide the best compatibility with existing x64 software";
+        if (message == Ids::lv2PaceProtectionWarning)   return "Either disable the LV2 plugin format or disable PACE Fusion protection on all exporters.";
 
         jassertfalse;
         return {};
@@ -180,7 +197,6 @@ enum class Async { no, yes };
 //==============================================================================
 class Project final : public FileBasedDocument,
                       private ValueTree::Listener,
-                      private LicenseController::LicenseStateListener,
                       private ChangeListener,
                       private AvailableModulesList::Listener,
                       private MessageBoxQueue::Listener
@@ -281,9 +297,6 @@ public:
     bool shouldIncludeBinaryInJuceHeader() const         { return includeBinaryDataInJuceHeaderValue.get(); }
     String getBinaryDataNamespaceString() const          { return binaryDataNamespaceValue.get(); }
 
-    bool shouldDisplaySplashScreen() const               { return displaySplashScreenValue.get(); }
-    String getSplashScreenColourString() const           { return splashScreenColourValue.get(); }
-
     static StringArray getCppStandardStrings()           { return { "C++17", "C++20", "Use Latest" }; }
     static Array<var> getCppStandardVars()               { return { "17",    "20",    "latest" }; }
 
@@ -361,6 +374,8 @@ public:
     static Array<var> getAllAUMainTypeVars() noexcept;
     Array<var> getDefaultAUMainTypes() const noexcept;
 
+    String getDefaultLV2PluginClass() const noexcept;
+
     static StringArray getAllVSTCategoryStrings() noexcept;
     Array<var> getDefaultVSTCategories() const noexcept;
 
@@ -382,6 +397,7 @@ public:
 
     String getAUMainTypeString() const noexcept;
     bool isAUSandBoxSafe() const noexcept;
+    String getLV2PluginClassString() const noexcept;
     String getVSTCategoryString() const noexcept;
     String getVST3CategoryString() const noexcept;
     int getAAXCategory() const noexcept;
@@ -413,6 +429,19 @@ public:
     bool shouldBuildTargetType (build_tools::ProjectType::Target::Type targetType) const noexcept;
     static build_tools::ProjectType::Target::Type getTargetTypeFromFilePath (const File& file, bool returnSharedTargetIfNoValidSuffix);
 
+    static String getTargetSuffixWithoutSpaces (const String& target)
+    {
+        if (target.isEmpty())
+            return {};
+
+        return String ("_") + target.removeCharacters (" ");
+    }
+
+    String getTargetBaseName (const String& target)
+    {
+        return getProjectFilenameRootString() + getTargetSuffixWithoutSpaces (target);
+    }
+
     //==============================================================================
     StringPairArray getAppConfigDefs();
     StringPairArray getAudioPluginFlags() const;
@@ -443,9 +472,6 @@ public:
         String getID() const;
         void setID (const String& newID);
         Item findItemWithID (const String& targetId) const; // (recursive search)
-
-        String getImageFileID() const;
-        std::unique_ptr<Drawable> loadAsImageFile() const;
 
         //==============================================================================
         Value getNameValue();
@@ -520,6 +546,14 @@ public:
     Item getMainGroup();
 
     void findAllImageItems (OwnedArray<Item>& items);
+
+    struct IconComposerNameAndItem
+    {
+        String name;
+        Item item;
+    };
+
+    std::vector<IconComposerNameAndItem> findAllIconComposerItems();
 
     //==============================================================================
     ValueTree getExporters();
@@ -601,7 +635,6 @@ public:
     std::vector<ProjectMessages::MessageAction> getMessageActions (const Identifier& message);
 
     //==============================================================================
-    bool hasIncompatibleLicenseTypeAndSplashScreenSetting() const;
     bool isFileModificationCheckPending() const;
     bool isSaveAndExportDisabled() const;
 
@@ -644,13 +677,13 @@ private:
     ValueTree projectRoot  { Ids::JUCERPROJECT };
 
     ValueTreePropertyWithDefault projectNameValue, projectUIDValue, projectLineFeedValue, projectTypeValue, versionValue, bundleIdentifierValue, companyNameValue,
-                                 companyCopyrightValue, companyWebsiteValue, companyEmailValue, displaySplashScreenValue, splashScreenColourValue, cppStandardValue,
-                                 headerSearchPathsValue, preprocessorDefsValue, userNotesValue, maxBinaryFileSizeValue, includeBinaryDataInJuceHeaderValue, binaryDataNamespaceValue,
-                                 compilerFlagSchemesValue, postExportShellCommandPosixValue, postExportShellCommandWinValue, useAppConfigValue, addUsingNamespaceToJuceHeader;
+                                 companyCopyrightValue, companyWebsiteValue, companyEmailValue, cppStandardValue, headerSearchPathsValue, preprocessorDefsValue,
+                                 userNotesValue, maxBinaryFileSizeValue, includeBinaryDataInJuceHeaderValue, binaryDataNamespaceValue, compilerFlagSchemesValue,
+                                 postExportShellCommandPosixValue, postExportShellCommandWinValue, useAppConfigValue, addUsingNamespaceToJuceHeader;
 
     ValueTreePropertyWithDefault pluginFormatsValue, pluginNameValue, pluginDescriptionValue, pluginManufacturerValue, pluginManufacturerCodeValue,
                                  pluginCodeValue, pluginChannelConfigsValue, pluginCharacteristicsValue, pluginAUExportPrefixValue, pluginAAXIdentifierValue,
-                                 pluginAUMainTypeValue, pluginAUSandboxSafeValue, pluginVSTCategoryValue, pluginVST3CategoryValue, pluginAAXCategoryValue,
+                                 pluginAUMainTypeValue, pluginAUSandboxSafeValue, pluginLV2PluginClassValue, pluginVSTCategoryValue, pluginVST3CategoryValue, pluginAAXCategoryValue,
                                  pluginEnableARA, pluginARAAnalyzableContentValue, pluginARAFactoryIDValue, pluginARAArchiveIDValue, pluginARACompatibleArchiveIDsValue, pluginARATransformFlagsValue,
                                  pluginVSTNumMidiInputsValue, pluginVSTNumMidiOutputsValue, pluginLV2URIValue;
 
@@ -694,6 +727,7 @@ private:
 
     //==============================================================================
     void updateTitleDependencies();
+    void updateVersionDependencies();
     void updateCompanyNameDependencies();
     void updateProjectSettings();
     void updateWebsiteDependencies();
@@ -706,11 +740,9 @@ private:
     void updateOldModulePaths();
 
     //==============================================================================
-    void licenseStateChanged() override;
     void changeListenerCallback (ChangeBroadcaster*) override;
     void availableModulesChanged (AvailableModulesList*) override;
 
-    void updateLicenseWarning();
     void updateJUCEPathWarning();
 
     void updateModuleWarnings();
@@ -720,6 +752,7 @@ private:
     void updateOldProjucerWarning (bool showWarning);
     void updateModuleNotFoundWarning (bool showWarning);
     void updateCodeWarning (Identifier identifier, String value);
+    void updatePaceFusionWarnings();
 
     ValueTree projectMessages { ProjectMessages::Ids::projectMessages, {},
                                 { { ProjectMessages::Ids::notification, {} }, { ProjectMessages::Ids::warning, {} } } };

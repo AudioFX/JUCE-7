@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -50,7 +59,6 @@ public:
             currentFileChooser = this;
             auto* env = getEnv();
 
-            auto sdkVersion         = getAndroidSDKVersion();
             auto saveMode           = ((flags & FileBrowserComponent::saveMode) != 0);
             auto selectsDirectories = ((flags & FileBrowserComponent::canSelectDirectories) != 0);
             auto canSelectMultiple  = ((flags & FileBrowserComponent::canSelectMultipleItems) != 0);
@@ -58,24 +66,9 @@ public:
             // You cannot save a directory
             jassert (! (saveMode && selectsDirectories));
 
-            if (sdkVersion < 19)
-            {
-                // native save dialogs are only supported in Android versions >= 19
-                jassert (! saveMode);
-                saveMode = false;
-            }
-
-            if (sdkVersion < 21)
-            {
-                // native directory chooser dialogs are only supported in Android versions >= 21
-                jassert (! selectsDirectories);
-                selectsDirectories = false;
-            }
-
             const char* action = (selectsDirectories ? "android.intent.action.OPEN_DOCUMENT_TREE"
                                                      : (saveMode ? "android.intent.action.CREATE_DOCUMENT"
-                                                     : (sdkVersion >= 19 ? "android.intent.action.OPEN_DOCUMENT"
-                                                     : "android.intent.action.GET_CONTENT")));
+                                                                 : "android.intent.action.OPEN_DOCUMENT"));
 
 
             intent = GlobalRef (LocalRef<jobject> (env->NewObject (AndroidIntent, AndroidIntent.constructWithString,
@@ -84,9 +77,11 @@ public:
             if (owner.startingFile != File())
             {
                 if (saveMode && (! owner.startingFile.isDirectory()))
-                    env->CallObjectMethod (intent.get(), AndroidIntent.putExtraString,
-                                           javaString ("android.intent.extra.TITLE").get(),
-                                           javaString (owner.startingFile.getFileName()).get());
+                {
+                    LocalRef { env->CallObjectMethod (intent.get(), AndroidIntent.putExtraString,
+                                                      javaString ("android.intent.extra.TITLE").get(),
+                                                      javaString (owner.startingFile.getFileName()).get()) };
+                }
 
 
                 URL url (owner.startingFile);
@@ -94,29 +89,30 @@ public:
                                                                     javaString (url.toString (true)).get()));
 
                 if (uri)
-                    env->CallObjectMethod (intent.get(), AndroidIntent.putExtraParcelable,
-                                           javaString ("android.provider.extra.INITIAL_URI").get(),
-                                           uri.get());
+                {
+                    LocalRef { env->CallObjectMethod (intent.get(), AndroidIntent.putExtraParcelable,
+                                                      javaString ("android.provider.extra.INITIAL_URI").get(),
+                                                      uri.get()) };
+                }
             }
 
-            if (canSelectMultiple && sdkVersion >= 18)
-            {
-                env->CallObjectMethod (intent.get(),
-                                       AndroidIntent.putExtraBool,
-                                       javaString ("android.intent.extra.ALLOW_MULTIPLE").get(),
-                                       true);
-            }
+            LocalRef { env->CallObjectMethod (intent.get(),
+                                              AndroidIntent.putExtraBool,
+                                              javaString ("android.intent.extra.ALLOW_MULTIPLE").get(),
+                                              canSelectMultiple) };
 
             if (! selectsDirectories)
             {
-                env->CallObjectMethod (intent.get(), AndroidIntent.addCategory,
-                                       javaString ("android.intent.category.OPENABLE").get());
+                LocalRef { env->CallObjectMethod (intent.get(), AndroidIntent.addCategory,
+                                                  javaString ("android.intent.category.OPENABLE").get()) };
 
                 auto mimeTypes = convertFiltersToMimeTypes (owner.filters);
 
                 if (mimeTypes.size() == 1)
                 {
-                    env->CallObjectMethod (intent.get(), AndroidIntent.setType, javaString (mimeTypes[0]).get());
+                    LocalRef { env->CallObjectMethod (intent.get(),
+                                                      AndroidIntent.setType,
+                                                      javaString (mimeTypes[0]).get()) };
                 }
                 else
                 {
@@ -138,15 +134,17 @@ public:
                                 allMimeTypesHaveSameGroup = false;
                         }
 
-                        env->CallObjectMethod (intent.get(), AndroidIntent.putExtraStrings,
-                                               javaString ("android.intent.extra.MIME_TYPES").get(),
-                                               jMimeTypes.get());
+                        LocalRef { env->CallObjectMethod (intent.get(), AndroidIntent.putExtraStrings,
+                                                          javaString ("android.intent.extra.MIME_TYPES").get(),
+                                                          jMimeTypes.get()) };
 
                         if (! allMimeTypesHaveSameGroup)
                             mimeGroup = "*";
                     }
 
-                    env->CallObjectMethod (intent.get(), AndroidIntent.setType, javaString (mimeGroup + "/*").get());
+                    LocalRef { env->CallObjectMethod (intent.get(),
+                                                      AndroidIntent.setType,
+                                                      javaString (mimeGroup + "/*").get()) };
                 }
             }
         }
@@ -199,7 +197,7 @@ public:
 
             const auto addUrl = [env, &chosenURLs] (jobject uri)
             {
-                if (auto jStr = (jstring) env->CallObjectMethod (uri, JavaObject.toString))
+                if (LocalRef jStr { (jstring) env->CallObjectMethod (uri, JavaObject.toString) })
                     chosenURLs.add (URL (juceString (env, jStr)));
             };
 

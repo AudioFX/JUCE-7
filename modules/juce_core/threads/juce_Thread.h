@@ -1,21 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   The code included in this file is provided under the terms of the ISC license
-   http://www.isc.org/downloads/software-support-policy/isc-license. Permission
-   To use, copy, modify, and/or distribute this software for any purpose with or
-   without fee is hereby granted provided that the above copyright notice and
-   this permission notice appear in all copies.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
+
+   Or:
+
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -249,7 +261,7 @@ public:
         and Thread::run() will not be called. An exception to this is the Android platform,
         which always starts a thread and attempts to upgrade the thread after creation.
 
-        @returns    true if the thread started successfully. false if it was unsuccesful.
+        @returns    true if the thread started successfully. false if it was unsuccessful.
 
         @see stopThread
     */
@@ -291,6 +303,42 @@ public:
         This method will cause the threadShouldExit() method to return true
         and call notify() in case the thread is currently waiting.
 
+        @see signalThreadShouldExit, threadShouldExit, waitForThreadToExit, isThreadRunning
+    */
+    void stopThread();
+
+    /** Attempts to stop the thread running.
+
+        This method will cause the threadShouldExit() method to return true
+        and call notify() in case the thread is currently waiting.
+
+        Hopefully the thread will then respond to this by exiting cleanly, and
+        the stopThread method will wait for a given time-period for this to
+        happen.
+
+        If the thread is stuck and fails to respond after the timeout, it gets
+        forcibly killed, which is a very bad thing to happen, as it could still
+        be holding locks, etc. which are needed by other parts of your program.
+
+        For this reason, unlike stopThread (int), only positive timeout values
+        are supported, anything else will trigger an assertion. To wait
+        indefinitely, call stopThread() with no arguments.
+
+        @param timeOut  The maximum time to wait for the thread to finish before
+                        killing it by force. Must be positive.
+
+        @returns    true if the thread was cleanly stopped before the timeout,
+                    or false if it had to be killed by force.
+
+        @see signalThreadShouldExit, threadShouldExit, waitForThreadToExit, isThreadRunning
+    */
+    bool stopThread (Seconds timeOut);
+
+    /** Attempts to stop the thread running.
+
+        This method will cause the threadShouldExit() method to return true
+        and call notify() in case the thread is currently waiting.
+
         Hopefully the thread will then respond to this by exiting cleanly, and
         the stopThread method will wait for a given time-period for this to
         happen.
@@ -302,8 +350,10 @@ public:
         @param timeOutMilliseconds  The number of milliseconds to wait for the
                                     thread to finish before killing it by force. A negative
                                     value in here will wait forever.
+
         @returns    true if the thread was cleanly stopped before the timeout, or false
                     if it had to be killed by force.
+
         @see signalThreadShouldExit, threadShouldExit, waitForThreadToExit, isThreadRunning
     */
     bool stopThread (int timeOutMilliseconds);
@@ -382,6 +432,28 @@ public:
     static bool currentThreadShouldExit();
 
     /** Waits for the thread to stop.
+
+        This will wait until isThreadRunning() is false.
+    */
+    void waitForThreadToExit() const;
+
+    /** Waits for the thread to stop.
+
+        This will wait until isThreadRunning() is false or until a timeout expires.
+
+        Unlike waitForThreadToExit (int), a negative timeout is not supported and
+        will trigger an assertion. To wait indefinitely, call waitForThreadToExit()
+        with no arguments.
+
+        @param timeOut      The maximum time to wait before returning. Must not
+                            be negative.
+
+        @returns    true if the thread exits, or false if the timeout expires first.
+    */
+    bool waitForThreadToExit (Seconds timeOut) const;
+
+    /** Waits for the thread to stop.
+
         This will wait until isThreadRunning() is false or until a timeout expires.
 
         @param timeOutMilliseconds  the time to wait, in milliseconds. If this value
@@ -442,6 +514,15 @@ public:
         be woken up so it should only be used for short periods of time and when other
         methods such as using a WaitableEvent or CriticalSection are not possible.
     */
+    static void JUCE_CALLTYPE sleep (Milliseconds duration);
+
+    /** Suspends the execution of the current thread until the specified timeout period
+        has elapsed (note that this may not be exact).
+
+        The timeout period must not be negative and whilst sleeping the thread cannot
+        be woken up so it should only be used for short periods of time and when other
+        methods such as using a WaitableEvent or CriticalSection are not possible.
+    */
     static void JUCE_CALLTYPE sleep (int milliseconds);
 
     /** Yields the current thread's CPU time-slot and allows a new thread to run.
@@ -452,6 +533,24 @@ public:
     static void JUCE_CALLTYPE yield();
 
     //==============================================================================
+    /** Suspends the execution of this thread until another thread calls the notify()
+        method to wake it up.
+    */
+    void wait() const;
+
+    /** Suspends the execution of this thread until either the specified timeout period
+        has elapsed, or another thread calls the notify() method to wake it up.
+
+        Unlike wait (double), a negative timeout is not supported and will trigger
+        an assertion. To wait indefinitely, call wait() with no arguments.
+
+        @param timeOut  The maximum time to wait for the thread to be notified.
+                        Must not be negative.
+
+        @returns    true if the event has been signalled, false if the timeout expires.
+    */
+    bool wait (Seconds timeOut) const;
+
     /** Suspends the execution of this thread until either the specified timeout period
         has elapsed, or another thread calls the notify() method to wake it up.
 
@@ -590,15 +689,15 @@ private:
     uint32 affinityMask = 0;
     bool deleteOnThreadEnd = false;
     std::atomic<bool> shouldExit { false };
-    ListenerList<Listener, Array<Listener*, CriticalSection>> listeners;
+    ThreadSafeListenerList<Listener> listeners;
 
    #if JUCE_ANDROID || JUCE_LINUX || JUCE_BSD
     std::atomic<Priority> priority;
    #endif
 
-   #ifndef DOXYGEN
+    /** @cond */
     friend void JUCE_API juce_threadEntryPoint (void*);
-   #endif
+    /** @endcond */
 
     bool startThreadInternal (Priority);
     bool createNativeThread (Priority);

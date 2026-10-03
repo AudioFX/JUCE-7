@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -64,6 +73,26 @@ private:
 };
 
 //==============================================================================
+struct PackageDependency
+{
+    explicit PackageDependency (StringRef dependencyIn)
+        : dependency { dependencyIn }
+    {
+    }
+
+    PackageDependency (StringRef dependencyIn, StringRef fallbackIn)
+        : dependency { dependencyIn },
+          fallback { fallbackIn }
+    {
+    }
+
+    String dependency;
+    std::optional<String> fallback;
+};
+
+std::vector<PackageDependency> makePackageDependencies (const StringArray& dependencies);
+
+//==============================================================================
 class ProjectExporter : private Value::Listener
 {
 public:
@@ -81,7 +110,20 @@ public:
 
     static std::vector<ExporterTypeInfo> getExporterTypeInfos();
     static ExporterTypeInfo getTypeInfoForExporter (const Identifier& exporterIdentifier);
-    static ExporterTypeInfo getCurrentPlatformExporterTypeInfo();
+
+    /** Sorted by suitability, with the 'best' exporter for the current platform first. */
+    static void getCurrentPlatformExporterTypeInfos (std::vector<ExporterTypeInfo>&);
+
+    static String getBestPlatformExporterIdentifier()
+    {
+        std::vector<ExporterTypeInfo> infos;
+        getCurrentPlatformExporterTypeInfos (infos);
+
+        if (infos.empty())
+            return {};
+
+        return infos.front().identifier.toString();
+    }
 
     static std::unique_ptr<ProjectExporter> createNewExporter (Project&, const Identifier& exporterIdentifier);
     static std::unique_ptr<ProjectExporter> createExporterFromSettings (Project&, const ValueTree& settings);
@@ -106,7 +148,6 @@ public:
     // IDE targeted by exporter
     virtual bool isXcode() const         = 0;
     virtual bool isVisualStudio() const  = 0;
-    virtual bool isCodeBlocks() const    = 0;
     virtual bool isMakefile() const      = 0;
     virtual bool isAndroidStudio() const = 0;
 
@@ -121,6 +162,7 @@ public:
     virtual String getDescription()  { return {}; }
 
     virtual bool supportsPrecompiledHeaders() const  { return false; }
+    virtual bool supportsPaceProtection() const { return false; }
 
     //==============================================================================
     // cross-platform audio plug-ins supported by exporter
@@ -175,7 +217,16 @@ public:
     bool shouldUseGNUExtensions() const                   { return gnuExtensionsValue.get(); }
 
     String getVSTLegacyPathString() const                 { return vstLegacyPathValueWrapper.getCurrentValue(); }
-    String getAAXPathString() const                       { return aaxPathValueWrapper.getCurrentValue(); }
+
+    auto getAAXPathRelative() const
+    {
+        const String userAaxFolder = aaxPathValueWrapper.getCurrentValue();
+        return userAaxFolder.isNotEmpty()
+             ? build_tools::RelativePath (userAaxFolder, build_tools::RelativePath::projectFolder)
+             : getModuleFolderRelativeToProject ("juce_audio_plugin_client").getChildFile ("AAX")
+                                                                            .getChildFile ("SDK");
+    }
+
     String getARAPathString() const                       { return araPathValueWrapper.getCurrentValue(); }
 
     // NB: this is the path to the parent "modules" folder that contains the named module, not the
@@ -201,9 +252,7 @@ public:
 
     void addProjectPathToBuildPathList (StringArray&, const build_tools::RelativePath&, int index = -1) const;
 
-    std::unique_ptr<Drawable> getBigIcon() const;
-    std::unique_ptr<Drawable> getSmallIcon() const;
-    build_tools::Icons getIcons() const { return { getSmallIcon(), getBigIcon() }; }
+    build_tools::Icons getIcons() const;
 
     String getExporterIdentifierMacro() const
     {
@@ -224,10 +273,9 @@ public:
 
     build_tools::RelativePath getVST3HelperProgramSource() const
     {
-        const auto suffix = isOSX() ? "mm" : "cpp";
         return getModuleFolderRelativeToProject ("juce_audio_plugin_client")
                .getChildFile ("VST3")
-               .getChildFile (String ("juce_VST3ManifestHelper.") + suffix);
+               .getChildFile ("juce_VST3ManifestHelper.cpp");
     }
 
     //==============================================================================
@@ -245,12 +293,12 @@ public:
         link
     };
 
-    StringArray getLinuxPackages (PackageDependencyType type) const;
+    std::vector<PackageDependency> getLinuxPackages (PackageDependencyType type) const;
 
     //==============================================================================
     StringPairArray msvcExtraPreprocessorDefs;
     String msvcDelayLoadedDLLs;
-    StringArray mingwLibs, windowsLibs;
+    StringArray windowsLibs;
 
     //==============================================================================
     StringArray androidLibs;
@@ -460,6 +508,23 @@ public:
     String getCompilerFlagsForFileCompilerFlagScheme (StringRef) const;
     String getCompilerFlagsForProjectItem (const Project::Item&) const;
 
+    bool isPaceProtectionEnabled() const { return paceProtectionValue.get(); }
+    void resetPaceProtection() { paceProtectionValue.resetToDefault(); }
+
+    File getPaceConfigurationFile() const
+    {
+        const String path = paceConfigurationFileValue.get();
+        return project.getProjectFolder().getChildFile (path);
+    }
+
+    File getPaceBuildSourceRoot() const
+    {
+        const String path = paceBuildSourceRootValue.get();
+        return project.getProjectFolder().getChildFile (path);
+    }
+
+    bool shouldUsePaceSharableTargetNames() const { return paceUseSharableTargetNames.get(); }
+
 protected:
     //==============================================================================
     String name;
@@ -472,7 +537,9 @@ protected:
     ValueTreePropertyWithDefaultWrapper vstLegacyPathValueWrapper, aaxPathValueWrapper, araPathValueWrapper;
 
     ValueTreePropertyWithDefault targetLocationValue, extraCompilerFlagsValue, extraLinkerFlagsValue, externalLibrariesValue,
-                                 userNotesValue, gnuExtensionsValue, bigIconValue, smallIconValue, extraPPDefsValue;
+                                 userNotesValue, gnuExtensionsValue, bigIconValue, smallIconValue, extraPPDefsValue,
+                                 paceProtectionValue, paceConfigurationFileValue, paceBuildSourceRootValue,
+                                 paceUseSharableTargetNames;
 
     Value projectCompilerFlagSchemesValue;
 

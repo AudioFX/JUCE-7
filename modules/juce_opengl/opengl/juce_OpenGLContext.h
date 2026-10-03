@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -27,6 +36,59 @@ namespace juce
 {
 
 class OpenGLTexture;
+
+/**
+    Denotes different kinds of OpenGL API that might be available.
+
+    In general, lower-power hardware (mobile devices) will have OpenGLES support, while
+    desktop-class hardware will have regular OpenGL support.
+
+    @tags{OpenGL}
+*/
+enum class OpenGLAPI
+{
+    openGL,     ///< Regular OpenGL (desktop)
+    openGLES,   ///< OpenGL ES (mobile)
+};
+
+/**
+    Denotes OpenGL profile kinds.
+
+    @tags{OpenGL}
+*/
+enum class OpenGLProfile
+{
+    compatibility,  ///< Context supports legacy/deprecated functionality
+    core,           ///< Context only supports core profile functionality
+};
+
+/**
+    Holds version information about a particular OpenGL API.
+
+    @tags{OpenGL}
+*/
+struct OpenGLVersion
+{
+    /** Default constructor, both fields are initialised to 0. */
+    OpenGLVersion() = default;
+
+    /** Initialises the major field only. */
+    explicit OpenGLVersion (int majorIn) : OpenGLVersion { majorIn, 0 } {}
+
+    /** Initialises the major and minor fields. */
+    OpenGLVersion (int majorIn, int minorIn) : major { majorIn }, minor { minorIn } {}
+
+    int major = 0; ///< Major version, i.e. the "4" in "4.3"
+    int minor = 0; ///< Minor version, i.e. the "3" in "4.3"
+
+    bool operator== (const OpenGLVersion&) const;
+    bool operator!= (const OpenGLVersion&) const;
+
+    bool operator<  (const OpenGLVersion&) const;
+    bool operator<= (const OpenGLVersion&) const;
+    bool operator>  (const OpenGLVersion&) const;
+    bool operator>= (const OpenGLVersion&) const;
+};
 
 //==============================================================================
 /**
@@ -110,7 +172,7 @@ public:
     /** Sets the texture magnification filter. By default the texture magnification
         filter is linear. However, for faster rendering you may want to use the
         'nearest' magnification filter. This option will not affect any textures
-        created before this function was called. */
+        uploaded before this function was called. */
     void setTextureMagnificationFilter (TextureMagnificationFilter magFilterMode) noexcept;
 
      //==============================================================================
@@ -154,7 +216,62 @@ public:
     /** Sets a preference for the version of GL that this context should use, if possible.
         Some platforms may ignore this value.
     */
+    [[deprecated ("Prefer the new function that accepts arbitrary major/minor versions")]]
     void setOpenGLVersionRequired (OpenGLVersion) noexcept;
+
+    using Version = juce::OpenGLVersion;
+
+    /** Sets the OpenGL API version that will be requested when the context is attached.
+
+        Platforms may ignore this request. Use getVersion() to determine the actual version that is
+        in use.
+
+        If you pass a Version with major and minor both set to 0, the platform will select its
+        default version, which will normally be a compatibility context.
+
+        Replaces setOpenGLVersionRequired().
+    */
+    void setPreferredVersion (const Version&);
+
+    /** Gets the OpenGL API version that will be requested when the context is attached. */
+    Version getPreferredVersion() const;
+
+    /** If the OpenGL context is attached, returns the API version of the context.
+        Avoid calling this while the context is detached.
+    */
+    Version getVersion() const;
+
+    using API = OpenGLAPI;
+
+    /** Sets the API that will be requested when the context is attached.
+
+        Platforms may ignore this request. Use getAPI() to determine the actual API that is in use.
+    */
+    void setPreferredAPI (API);
+
+    /** Gets the API that will be requested when the context is attached. */
+    API getPreferredAPI() const;
+
+    /** If the OpenGL context is attached, returns the API in use by the context.
+        Avoid calling this while the context is detached.
+    */
+    API getAPI() const;
+
+    using Profile = OpenGLProfile;
+
+    /** Sets the Profile that will be requested when the context is attached.
+
+        Platforms may ignore this request. Use getProfile() to determine the actual Profile that is in use.
+    */
+    void setPreferredProfile (Profile);
+
+    /** Gets the Profile that will be requested when the context is attached. */
+    Profile getPreferredProfile() const;
+
+    /** If the OpenGL context is attached, returns the Profile in use by the context.
+        Avoid calling this while the context is detached.
+    */
+    Profile getProfile() const;
 
     /** Enables or disables the use of the GL context to perform 2D rendering
         of the component to which it is attached.
@@ -301,6 +418,7 @@ public:
 
         @see OpenGLVersion
     */
+    [[deprecated ("Prefer getProfile()")]]
     bool isCoreProfile() const;
 
     /** This structure holds a set of dynamically loaded GL functions for use on this context. */
@@ -309,33 +427,39 @@ public:
     //==============================================================================
     /** Draws the currently selected texture into this context at its original size.
 
-        @param targetClipArea  the target area to draw into (in top-left origin coords)
-        @param anchorPosAndTextureSize  the position of this rectangle is the texture's top-left
-                                        anchor position in the target space, and the size must be
-                                        the total size of the texture.
-        @param contextWidth     the width of the context or framebuffer that is being drawn into,
-                                used for scaling of the coordinates.
-        @param contextHeight    the height of the context or framebuffer that is being drawn into,
-                                used for vertical flipping of the y coordinates.
-        @param textureOriginIsBottomLeft    if true, the texture's origin is treated as being at
-                                (0, 0). If false, it is assumed to be (0, 1)
+        @param targetClipArea             the target area to draw into (in top-left origin coords)
+        @param anchorPosAndTextureSize    the position of this rectangle is the texture's top-left
+                                          anchor position in the target space, and the size must be
+                                          the total size of the texture.
+        @param contextWidth               the width of the context or framebuffer that is being
+                                          drawn into, used for scaling of the coordinates.
+        @param contextHeight              the height of the context or framebuffer that is being
+                                          drawn into, used for vertical flipping of the y
+                                          coordinates.
+        @param textureOriginIsBottomLeft  if true, the texture's origin is treated as being at
+                                          (0, 0). If false, it is assumed to be (0, 1)
+        @param blend                      if true, the texture's alpha is used to blend the texture
+                                          with transparency on top the context's existing content.
+                                          If false, the texture is drawn with no alpha, overwriting
+                                          the content of the context.
     */
     void copyTexture (const Rectangle<int>& targetClipArea,
                       const Rectangle<int>& anchorPosAndTextureSize,
                       int contextWidth, int contextHeight,
-                      bool textureOriginIsBottomLeft);
+                      bool textureOriginIsBottomLeft,
+                      bool blend = true);
 
-
-    /** Changes the amount of GPU memory that the internal cache for Images is allowed to use. */
+    /** Changes the amount of GPU memory, in bytes, that the internal cache for Images is allowed to use. */
     void setImageCacheSize (size_t cacheSizeBytes) noexcept;
 
-    /** Returns the amount of GPU memory that the internal cache for Images is allowed to use. */
+    /** Returns the amount of GPU memory, in bytes, that the internal cache for Images is allowed to use. */
     size_t getImageCacheSize() const noexcept;
 
     //==============================================================================
-   #ifndef DOXYGEN
+    /** @cond */
     class NativeContext;
-   #endif
+    class NativeContextListener;
+    /** @endcond */
 
 private:
     enum class InitResult
@@ -349,14 +473,31 @@ private:
 
     class CachedImage;
     class Attachment;
+
+    ListenerList<NativeContextListener> nativeContextListeners;
+
     NativeContext* nativeContext = nullptr;
     OpenGLRenderer* renderer = nullptr;
     double currentRenderScale = 1.0;
     std::unique_ptr<Attachment> attachment;
     OpenGLPixelFormat openGLPixelFormat;
     void* contextToShareWith = nullptr;
-    OpenGLVersion versionRequired = defaultGLVersion;
-    size_t imageCacheMaxSize = 8 * 1024 * 1024;
+    Version preferredVersion{}, actualVersion{};
+    API preferredAPI =
+       #if JUCE_OPENGL_ES
+        API::openGLES
+       #else
+        API::openGL
+       #endif
+    , actualAPI{};
+    Profile preferredProfile =
+       #if JUCE_OPENGL_ES
+        Profile::core
+       #else
+        Profile::compatibility
+       #endif
+    , actualProfile{};
+    size_t imageCacheMaxSize = 32 * 1024 * 1024;
     bool renderComponents = true, useMultisampling = false, overrideCanAttach = false;
     std::atomic<bool> continuousRepaint { false };
     TextureMagnificationFilter texMagFilter = linear;
@@ -382,14 +523,15 @@ private:
     //==============================================================================
     CachedImage* getCachedImage() const noexcept;
     void execute (AsyncWorker::Ptr, bool);
+    void clearNativeContext();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGLContext)
 };
 
 //==============================================================================
-#ifndef DOXYGEN
+/** @cond */
 template <typename FunctionType>
 void OpenGLContext::executeOnGLThread (FunctionType&& f, bool shouldBlock) { execute (new AsyncWorkerFunctor<FunctionType> (f), shouldBlock); }
-#endif
+/** @endcond */
 
 } // namespace juce

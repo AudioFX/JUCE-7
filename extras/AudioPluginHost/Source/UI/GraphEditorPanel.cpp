@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -213,20 +222,20 @@ struct GraphEditorPanel::PluginComponent final : public Component,
 
         toFront (true);
 
-        if (isOnTouchDevice())
+        if (e.source.isTouch())
         {
+            originalTouchPos = e.position.toInt();
             startTimer (750);
         }
-        else
+        else if (e.mods.isPopupMenu())
         {
-            if (e.mods.isPopupMenu())
-                showPopupMenu();
+            showPopupMenu (e.position.toInt());
         }
     }
 
     void mouseDrag (const MouseEvent& e) override
     {
-        if (isOnTouchDevice() && e.getDistanceFromDragStart() > 5)
+        if (e.source.isTouch() && e.getDistanceFromDragStart() > 5)
             stopTimer();
 
         if (! e.mods.isPopupMenu())
@@ -248,7 +257,7 @@ struct GraphEditorPanel::PluginComponent final : public Component,
 
     void mouseUp (const MouseEvent& e) override
     {
-        if (isOnTouchDevice())
+        if (e.source.isTouch())
         {
             stopTimer();
             callAfterDelay (250, []() { PopupMenu::dismissAllActiveMenus(); });
@@ -352,7 +361,7 @@ struct GraphEditorPanel::PluginComponent final : public Component,
 
         w = jmax (w, (jmax (numIns, numOuts) + 1) * 20);
 
-        const int textWidth = font.getStringWidth (processor.getName());
+        const auto textWidth = GlyphArrangement::getStringWidthInt (font, processor.getName());
         w = jmax (w, 16 + jmin (textWidth, 300));
         if (textWidth > 300)
             h = 100;
@@ -404,7 +413,7 @@ struct GraphEditorPanel::PluginComponent final : public Component,
         return false;
     }
 
-    void showPopupMenu()
+    void showPopupMenu (Point<int> localPos)
     {
         menu.reset (new PopupMenu);
         menu->addItem ("Delete this filter", [this] { graph.graph.removeNode (pluginID); });
@@ -444,7 +453,7 @@ struct GraphEditorPanel::PluginComponent final : public Component,
         menu->addItem ("Load plugin state", [this] { loadPluginState(); });
        #endif
 
-        menu->showMenuAsync ({});
+        menu->showMenuAsync (PopupMenu::Options{}.withTargetScreenArea (Rectangle<int>{}.withPosition (localPointToGlobal (localPos))));
     }
 
     void testStateSaveLoad()
@@ -466,11 +475,8 @@ struct GraphEditorPanel::PluginComponent final : public Component,
 
     void timerCallback() override
     {
-        // this should only be called on touch devices
-        jassert (isOnTouchDevice());
-
         stopTimer();
-        showPopupMenu();
+        showPopupMenu (originalTouchPos);
     }
 
     void parameterValueChanged (int, float) override
@@ -543,8 +549,8 @@ struct GraphEditorPanel::PluginComponent final : public Component,
     OwnedArray<PinComponent> pins;
     int numInputs = 0, numOutputs = 0;
     int pinSize = 16;
-    Point<int> originalPos;
-    Font font { 13.0f, Font::bold };
+    Point<int> originalPos, originalTouchPos;
+    Font font = FontOptions { 13.0f, Font::bold };
     int numIns = 0, numOuts = 0;
     DropShadowEffect shadow;
     std::unique_ptr<PopupMenu> menu;
@@ -771,19 +777,20 @@ void GraphEditorPanel::paint (Graphics& g)
 
 void GraphEditorPanel::mouseDown (const MouseEvent& e)
 {
-    if (isOnTouchDevice())
+    if (e.source.isTouch())
     {
         originalTouchPos = e.position.toInt();
         startTimer (750);
     }
-
-    if (e.mods.isPopupMenu())
+    else if (e.mods.isPopupMenu())
+    {
         showPopupMenu (e.position.toInt());
+    }
 }
 
-void GraphEditorPanel::mouseUp (const MouseEvent&)
+void GraphEditorPanel::mouseUp (const MouseEvent& e)
 {
-    if (isOnTouchDevice())
+    if (e.source.isTouch())
     {
         stopTimer();
         callAfterDelay (250, []() { PopupMenu::dismissAllActiveMenus(); });
@@ -792,7 +799,7 @@ void GraphEditorPanel::mouseUp (const MouseEvent&)
 
 void GraphEditorPanel::mouseDrag (const MouseEvent& e)
 {
-    if (isOnTouchDevice() && e.getDistanceFromDragStart() > 5)
+    if (e.source.isTouch() && e.getDistanceFromDragStart() > 5)
         stopTimer();
 }
 
@@ -883,7 +890,7 @@ void GraphEditorPanel::updateComponents()
     }
 }
 
-void GraphEditorPanel::showPopupMenu (Point<int> mousePos)
+void GraphEditorPanel::showPopupMenu (Point<int> localMousePos)
 {
     menu.reset (new PopupMenu);
 
@@ -891,12 +898,12 @@ void GraphEditorPanel::showPopupMenu (Point<int> mousePos)
     {
         mainWindow->addPluginsToMenu (*menu);
 
-        menu->showMenuAsync ({},
-                             ModalCallbackFunction::create ([this, mousePos] (int r)
+        menu->showMenuAsync (PopupMenu::Options{}.withTargetScreenArea (Rectangle<int>{}.withPosition (localPointToGlobal (localMousePos))),
+                             ModalCallbackFunction::create ([this, localMousePos] (int r)
                                                             {
                                                                 if (auto* mainWin = findParentComponentOfClass<MainHostWindow>())
                                                                     if (const auto chosen = mainWin->getChosenType (r))
-                                                                        createNewPlugin (*chosen, mousePos);
+                                                                        createNewPlugin (*chosen, localMousePos);
                                                             }));
     }
 }
@@ -993,9 +1000,6 @@ void GraphEditorPanel::endDraggingConnector (const MouseEvent& e)
 
 void GraphEditorPanel::timerCallback()
 {
-    // this should only be called on touch devices
-    jassert (isOnTouchDevice());
-
     stopTimer();
     showPopupMenu (originalTouchPos);
 }
@@ -1011,7 +1015,7 @@ struct GraphDocumentComponent::TooltipBar final : public Component,
 
     void paint (Graphics& g) override
     {
-        g.setFont (Font ((float) getHeight() * 0.7f, Font::bold));
+        g.setFont (FontOptions ((float) getHeight() * 0.7f, Font::bold));
         g.setColour (Colours::black);
         g.drawFittedText (tip, 10, 0, getWidth() - 12, getHeight(), Justification::centredLeft, 1);
     }
@@ -1115,7 +1119,7 @@ private:
 
         pluginButton.setBounds (r.removeFromRight (40).withSizeKeepingCentre (20, 20));
 
-        titleLabel.setFont (Font (static_cast<float> (getHeight()) * 0.5f, Font::plain));
+        titleLabel.setFont (FontOptions (static_cast<float> (getHeight()) * 0.5f, Font::plain));
         titleLabel.setBounds (r);
     }
 
@@ -1235,7 +1239,7 @@ void GraphDocumentComponent::init()
 
     graphPanel->updateComponents();
 
-    if (isOnTouchDevice())
+    if (Desktop::getInstance().getMainMouseSource().isTouch())
     {
         titleBarComponent.reset (new TitleBarComponent (*this));
         addAndMakeVisible (titleBarComponent.get());
@@ -1282,7 +1286,7 @@ void GraphDocumentComponent::resized()
     const int keysHeight = 60;
     const int statusHeight = 20;
 
-    if (isOnTouchDevice())
+    if (Desktop::getInstance().getMainMouseSource().isTouch())
         titleBarComponent->setBounds (r.removeFromTop (titleBarHeight));
 
     keyboardComp->setBounds (r.removeFromBottom (keysHeight));

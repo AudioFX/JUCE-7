@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -85,7 +94,8 @@ namespace XWindowSystemUtilities
 
         static constexpr unsigned long DndVersion = 3;
 
-        Atom protocols, protocolList[3], changeState, state, userTime, activeWin, pid, windowType, windowState, windowStateHidden,
+        Atom protocols, protocolList[3], changeState, state, userTime, activeWin, pid, windowType, windowState,
+             windowStateHidden, windowStateMaximisedHorz, windowStateMaximisedVert,
              XdndAware, XdndEnter, XdndLeave, XdndPosition, XdndStatus, XdndDrop, XdndFinished, XdndSelection,
              XdndTypeList, XdndActionList, XdndActionDescription, XdndActionCopy, XdndActionPrivate,
              XembedMsgType, XembedInfo, allowedActions[5], allowedMimeTypes[4], utf8String, clipboard, targets;
@@ -172,14 +182,14 @@ class XWindowSystem  : public DeletedAtShutdown
 {
 public:
     //==============================================================================
-    ::Window createWindow (::Window parentWindow, LinuxComponentPeer*) const;
+    ::Window createWindow (::Window parentWindow, LinuxComponentPeer*);
     void destroyWindow    (::Window);
 
     void setTitle (::Window, const String&) const;
     void setIcon (::Window , const Image&) const;
     void setVisible (::Window, bool shouldBeVisible) const;
-    void setBounds (::Window, Rectangle<int>, bool fullScreen) const;
-    void updateConstraints (::Window) const;
+    [[nodiscard]] std::optional<unsigned long> setBounds (::Window, Rectangle<int>, bool fullScreen) const;
+    void updateSizeHints (::Window, ComponentPeer&, Rectangle<int> physicalBounds) const;
 
     ComponentPeer::OptionalBorderSize getBorderSize (::Window) const;
     Rectangle<int> getWindowBounds (::Window, ::Window parentWindow);
@@ -189,6 +199,7 @@ public:
 
     void setMinimised (::Window, bool shouldBeMinimised) const;
     bool isMinimised  (::Window) const;
+    bool isFullScreen (::Window) const;
 
     void setMaximised (::Window, bool shouldBeMinimised) const;
 
@@ -200,6 +211,7 @@ public:
 
     bool canUseSemiTransparentWindows() const;
     bool canUseARGBImages() const;
+    bool canUseMultiTouch() const;
     bool isDarkModeActive() const;
 
     int getNumPaintsPendingForWindow (::Window);
@@ -244,6 +256,9 @@ public:
     void startHostManagedResize (::Window window,
                                  ResizableBorderComponent::Zone zone);
 
+    bool grabPointerForExternalDrag (::Window, Cursor) const;
+    void ungrabPointer() const;
+
     static String getWindowScalingFactorSettingName()  { return "Gdk/WindowScalingFactor"; }
     static String getThemeNameSettingName()            { return "Net/ThemeName"; }
 
@@ -252,7 +267,7 @@ public:
     bool isParentWindowOf (::Window, ::Window possibleChild) const;
 
     //==============================================================================
-    JUCE_DECLARE_SINGLETON (XWindowSystem, false)
+    JUCE_DECLARE_SINGLETON_INLINE (XWindowSystem, false)
 
 private:
     XWindowSystem();
@@ -305,10 +320,13 @@ private:
     //==============================================================================
     void handleKeyPressEvent        (LinuxComponentPeer*, XKeyEvent&) const;
     void handleKeyReleaseEvent      (LinuxComponentPeer*, const XKeyEvent&) const;
-    void handleWheelEvent           (LinuxComponentPeer*, const XButtonPressedEvent&, float) const;
-    void handleButtonPressEvent     (LinuxComponentPeer*, const XButtonPressedEvent&, int) const;
+    void handleWheelEvent           (LinuxComponentPeer*, int64, Point<float>, float) const;
+    void handleButtonPressEvent     (LinuxComponentPeer*, int64, Point<float>, int) const;
+    void handleButtonPressEvent     (LinuxComponentPeer*, int, int, ::Time, Point<double>) const;
     void handleButtonPressEvent     (LinuxComponentPeer*, const XButtonPressedEvent&) const;
+    void handleButtonReleaseEvent   (LinuxComponentPeer*, int, int, ::Time, Point<double>) const;
     void handleButtonReleaseEvent   (LinuxComponentPeer*, const XButtonReleasedEvent&) const;
+    void handleMotionNotifyEvent    (LinuxComponentPeer*, int, ::Time, Point<double>) const;
     void handleMotionNotifyEvent    (LinuxComponentPeer*, const XPointerMovedEvent&) const;
     void handleEnterNotifyEvent     (LinuxComponentPeer*, const XEnterWindowEvent&) const;
     void handleLeaveNotifyEvent     (LinuxComponentPeer*, const XLeaveWindowEvent&) const;
@@ -322,9 +340,12 @@ private:
     void handleClientMessageEvent   (LinuxComponentPeer*, XClientMessageEvent&, XEvent&) const;
     void handleXEmbedMessage        (LinuxComponentPeer*, XClientMessageEvent&) const;
 
+   #if JUCE_USE_XINPUT
+    void handleXIDeviceEvent        (LinuxComponentPeer*, int, XIDeviceEvent&) const;
+   #endif
+
     void dismissBlockingModals      (LinuxComponentPeer*) const;
     void dismissBlockingModals      (LinuxComponentPeer*, const XConfigureEvent&) const;
-    void updateConstraints          (::Window, ComponentPeer&) const;
 
     ::Window findTopLevelWindowOf (::Window) const;
 
@@ -343,7 +364,7 @@ private:
    #endif
 
     int shmCompletionEvent = 0;
-    int pointerMap[5] = {};
+    unsigned char pointerMap[9]{};
     String localClipboardContent;
 
     Point<int> parentScreenPosition;

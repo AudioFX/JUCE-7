@@ -1,96 +1,39 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
 
 namespace juce
 {
-
-struct DefaultFontNames
-{
-    DefaultFontNames()
-        : defaultSans  ("sans"),
-          defaultSerif ("serif"),
-          defaultFixed ("monospace"),
-          defaultFallback ("sans")
-    {
-    }
-
-    String getRealFontName (const String& faceName) const
-    {
-        if (faceName == Font::getDefaultSansSerifFontName())    return defaultSans;
-        if (faceName == Font::getDefaultSerifFontName())        return defaultSerif;
-        if (faceName == Font::getDefaultMonospacedFontName())   return defaultFixed;
-
-        return faceName;
-    }
-
-    String defaultSans, defaultSerif, defaultFixed, defaultFallback;
-};
-
-Typeface::Ptr Font::getDefaultTypefaceForFont (const Font& font)
-{
-    static DefaultFontNames defaultNames;
-
-    Font f (font);
-    f.setTypefaceName (defaultNames.getRealFontName (font.getTypefaceName()));
-    return Typeface::createSystemTypefaceFor (f);
-}
-
-//==============================================================================
-#if JUCE_USE_FREETYPE
-
-StringArray FTTypefaceList::getDefaultFontDirectories()
-{
-    return StringArray ("/system/fonts");
-}
-
-Typeface::Ptr Typeface::createSystemTypefaceFor (const Font& font)
-{
-    return new FreeTypeTypeface (font);
-}
-
-void Typeface::scanFolderForFonts (const File& folder)
-{
-    FTTypefaceList::getInstance()->scanFontPaths (StringArray (folder.getFullPathName()));
-}
-
-StringArray Font::findAllTypefaceNames()
-{
-    return FTTypefaceList::getInstance()->findAllFamilyNames();
-}
-
-StringArray Font::findAllTypefaceStyles (const String& family)
-{
-    return FTTypefaceList::getInstance()->findAllTypefaceStyles (family);
-}
-
-bool TextLayout::createNativeLayout (const AttributedString&)
-{
-    return false;
-}
-
-#else
 
 //==============================================================================
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
@@ -99,6 +42,15 @@ bool TextLayout::createNativeLayout (const AttributedString&)
  STATICMETHOD (createFromAsset, "createFromAsset",  "(Landroid/content/res/AssetManager;Ljava/lang/String;)Landroid/graphics/Typeface;")
 
  DECLARE_JNI_CLASS (TypefaceClass, "android/graphics/Typeface")
+#undef JNI_CLASS_MEMBERS
+
+#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
+ METHOD (create,                   "<init>",                   "(Ljava/nio/ByteBuffer;)V") \
+ METHOD (setTtcIndex,              "setTtcIndex",              "(I)Landroid/graphics/fonts/Font$Builder;") \
+ METHOD (setFontVariationSettings, "setFontVariationSettings", "(Ljava/lang/String;)Landroid/graphics/fonts/Font$Builder;") \
+ METHOD (build,                    "build",                    "()Landroid/graphics/fonts/Font;")
+
+ DECLARE_JNI_CLASS_WITH_MIN_SDK (AndroidFontBuilder, "android/graphics/fonts/Font$Builder", 29)
 #undef JNI_CLASS_MEMBERS
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
@@ -126,424 +78,861 @@ DECLARE_JNI_CLASS (AndroidRectF, "android/graphics/RectF")
 DECLARE_JNI_CLASS (JavaMessageDigest, "java/security/MessageDigest")
 #undef JNI_CLASS_MEMBERS
 
-//==============================================================================
-StringArray Font::findAllTypefaceNames()
+#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
+ METHOD       (open,      "open",      "(Ljava/lang/String;)Ljava/io/InputStream;") \
+
+DECLARE_JNI_CLASS (AndroidAssetManager, "android/content/res/AssetManager")
+#undef JNI_CLASS_MEMBERS
+
+#define JUCE_INTRODUCED_IN_29 \
+    JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wgnu-zero-variadic-macro-arguments") \
+    __INTRODUCED_IN (29)                                                       \
+    JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+
+// Defined in juce_core
+std::unique_ptr<InputStream> makeAndroidInputStreamWrapper (LocalRef<jobject> stream);
+
+struct AndroidCachedTypeface
 {
-    StringArray results;
-
-    for (auto& f : File ("/system/fonts").findChildFiles (File::findFiles, false, "*.ttf"))
-        results.addIfNotAlreadyThere (f.getFileNameWithoutExtension().upToLastOccurrenceOf ("-", false, false));
-
-    return results;
-}
-
-StringArray Font::findAllTypefaceStyles (const String& family)
-{
-    StringArray results ("Regular");
-
-    for (auto& f : File ("/system/fonts").findChildFiles (File::findFiles, false, family + "-*.ttf"))
-        results.addIfNotAlreadyThere (f.getFileNameWithoutExtension().fromLastOccurrenceOf ("-", false, false));
-
-    return results;
-}
-
-const float referenceFontSize = 256.0f;
-const float referenceFontToUnits = 1.0f / referenceFontSize;
+    HbFont font;
+    GlobalRef javaFont;
+    TypefaceVerticalMetrics metrics;
+};
 
 //==============================================================================
-class AndroidTypeface final : public Typeface
+class AndroidTypeface final : public Typeface,
+                              private TypefaceFallbackColourGlyphSupport
 {
 public:
-    AndroidTypeface (const Font& font)
-        : Typeface (font.getTypefaceName(), font.getTypefaceStyle()),
-          ascent (0), descent (0), heightToPointsFactor (1.0f)
+    static Ptr from (const Font& font)
     {
-        JNIEnv* const env = getEnv();
+        const auto blobForFont = getBlobForFont (font);
+        const auto& blob = blobForFont.data;
+        const auto index = (unsigned int) blobForFont.collectionIndex;
 
-        // First check whether there's an embedded asset with this font name:
-        typeface = GlobalRef (getTypefaceFromAsset (name));
+        auto face = FontStyleHelpers::getFaceForBlob ({ static_cast<const char*> (blob.getData()), blob.getSize() }, index);
 
-        if (typeface.get() == nullptr)
+        if (face == nullptr)
         {
-            const bool isBold   = style.contains ("Bold");
-            const bool isItalic = style.contains ("Italic");
-
-            File fontFile (getFontFile (name, style));
-
-            if (! fontFile.exists())
-                fontFile = findFontFile (name, isBold, isItalic);
-
-            if (fontFile.exists())
-                typeface = GlobalRef (LocalRef<jobject> (env->CallStaticObjectMethod (TypefaceClass, TypefaceClass.createFromFile,
-                                                                                      javaString (fontFile.getFullPathName()).get())));
-            else
-                typeface = GlobalRef (LocalRef<jobject> (env->CallStaticObjectMethod (TypefaceClass, TypefaceClass.create,
-                                                                                      javaString (getName()).get(),
-                                                                                      (isBold ? 1 : 0) + (isItalic ? 2 : 0))));
+            jassertfalse;
+            return {};
         }
 
-        initialise (env);
+        HbFont hbFont { hb_font_create (face.get()), IncrementRef::no };
+        FontStyleHelpers::initSynthetics (hbFont.get(), font);
+
+        const auto androidFont = shouldStoreAndroidFont (face.get())
+                               ? makeAndroidFont ({ static_cast<const std::byte*> (blob.getData()), blob.getSize() }, index)
+                               : GlobalRef{};
+
+        Ptr baseFace = new AndroidTypeface (std::move (hbFont),
+                                            blobForFont.metrics,
+                                            androidFont);
+
+        if (baseFace->getStyle() == font.getTypefaceStyle())
+            return baseFace;
+
+        const auto variables = baseFace->getNamedInstanceConfiguration (font.getTypefaceStyle());
+
+        if (variables.empty())
+            return baseFace;
+
+        auto cloned = baseFace->cloneWithVariableSettings (variables);
+
+        if (cloned == nullptr)
+            return baseFace;
+
+        return cloned;
     }
 
-    AndroidTypeface (const void* data, size_t size)
-        : Typeface (String (static_cast<uint64> (reinterpret_cast<uintptr_t> (data))), String())
+    static Ptr from (Span<const std::byte> blob, unsigned int index = 0)
     {
-        auto* env = getEnv();
-        auto cacheFile = getCacheFileForData (data, size);
-
-        typeface = GlobalRef (LocalRef<jobject> (env->CallStaticObjectMethod (TypefaceClass, TypefaceClass.createFromFile,
-                                                                              javaString (cacheFile.getFullPathName()).get())));
-
-        initialise (env);
+        return fromMemory (blob, index);
     }
 
-    void initialise (JNIEnv* const env)
+    Ptr createSystemFallback (const String& text, const String& language) const override
     {
-        rect = GlobalRef (LocalRef<jobject> (env->NewObject (AndroidRect, AndroidRect.constructor, 0, 0, 0, 0)));
+        if (__builtin_available (android 29, *))
+            return matchWithAFontMatcher (text, language);
 
-        paint = GlobalRef (GraphicsHelpers::createPaint (Graphics::highResamplingQuality));
-        const LocalRef<jobject> ignored (paint.callObjectMethod (AndroidPaint.setTypeface, typeface.get()));
-
-        charArray = GlobalRef (LocalRef<jobject> ((jobject) env->NewCharArray (2)));
-
-        paint.callVoidMethod (AndroidPaint.setTextSize, referenceFontSize);
-
-        const float fullAscent = std::abs (paint.callFloatMethod (AndroidPaint.ascent));
-        const float fullDescent = paint.callFloatMethod (AndroidPaint.descent);
-        const float totalHeight = fullAscent + fullDescent;
-
-        ascent  = fullAscent / totalHeight;
-        descent = fullDescent / totalHeight;
-        heightToPointsFactor = referenceFontSize / totalHeight;
+        // The font-fallback API is only available on Android API level 29+
+        jassertfalse;
+        return {};
     }
 
-    float getAscent() const override                 { return ascent; }
-    float getDescent() const override                { return descent; }
-    float getHeightToPointsFactor() const override   { return heightToPointsFactor; }
-
-    float getStringWidth (const String& text) override
+    Ptr cloneWithVariableSettings (Span<const FontVariableSetting> settings) const override
     {
-        JNIEnv* env = getEnv();
-        auto numChars = CharPointer_UTF16::getBytesRequiredFor (text.getCharPointer());
-        jfloatArray widths = env->NewFloatArray ((int) numChars);
+        auto nativeDetails = getNativeDetails();
+        auto blob = nativeDetails->getBlob();
 
-        const int numDone = paint.callIntMethod (AndroidPaint.getTextWidths, javaString (text).get(), widths);
+        unsigned int blobSize = 0;
+        auto* blobData = hb_blob_get_data (blob.get(), &blobSize);
+        auto metrics = findNonPortableMetricsForData ({ (const std::byte*) blobData, blobSize });
+        auto newFace = FontStyleHelpers::getFaceForBlob ({ blobData, blobSize }, 0);
 
-        HeapBlock<jfloat> localWidths (static_cast<size_t> (numDone));
-        env->GetFloatArrayRegion (widths, 0, numDone, localWidths);
-        env->DeleteLocalRef (widths);
-
-        float x = 0;
-
-        for (int i = 0; i < numDone; ++i)
-            x += localWidths[i];
-
-        return x * referenceFontToUnits;
-    }
-
-    void getGlyphPositions (const String& text, Array<int>& glyphs, Array<float>& xOffsets) override
-    {
-        JNIEnv* env = getEnv();
-        auto numChars = CharPointer_UTF16::getBytesRequiredFor (text.getCharPointer());
-        jfloatArray widths = env->NewFloatArray ((int) numChars);
-
-        const int numDone = paint.callIntMethod (AndroidPaint.getTextWidths, javaString (text).get(), widths);
-
-        HeapBlock<jfloat> localWidths (static_cast<size_t> (numDone));
-        env->GetFloatArrayRegion (widths, 0, numDone, localWidths);
-        env->DeleteLocalRef (widths);
-
-        auto s = text.getCharPointer();
-
-        xOffsets.add (0);
-        float x = 0;
-
-        for (int i = 0; i < numDone; ++i)
+        if (newFace == nullptr)
         {
-            const float local = localWidths[i];
+            jassertfalse;
+            return {};
+        }
 
-            // Android uses jchar (UTF-16) characters
-            jchar ch = (jchar) s.getAndAdvance();
+        HbFont hbFont { hb_font_create (newFace.get()), IncrementRef::no };
 
-            // Android has no proper glyph support, so we have to do
-            // a hacky workaround for ligature detection
+        const auto registry = nativeDetails->getVariableRegistry();
+        auto sanitisedVariables = registry->sanitiseVariables (settings);
 
-           #if JUCE_STRING_UTF_TYPE <= 16
-            static_assert (sizeof (int) >= (sizeof (jchar) * 2), "Unable store two java chars in one glyph");
+        const auto androidFont = shouldStoreAndroidFont (newFace.get())
+                               ? makeAndroidFont ({ reinterpret_cast<const std::byte*> (blobData),
+                                                    blobSize },
+                                                  0,
+                                                  sanitisedVariables)
+                               : GlobalRef{};
 
-            // if the width of this glyph is zero inside the string but has
-            // a width on it's own, then it's probably due to ligature
-            if (local == 0.0f && glyphs.size() > 0 && getStringWidth (String (ch)) > 0.0f)
+        return new AndroidTypeface (std::move (hbFont),
+                                    metrics,
+                                    androidFont,
+                                    registry,
+                                    std::move (sanitisedVariables));
+    }
+
+    const Native* getNativeDetails() const override
+    {
+        return native.get();
+    }
+
+    static Ptr findSystemTypeface()
+    {
+        if (__builtin_available (android 29, *))
+            return findSystemTypefaceWithMatcher();
+
+        return from (FontOptions{}.withName ("Roboto"));
+    }
+
+    static JUCE_INTRODUCED_IN_29 auto findAFontWithMatcher (const Font& font)
+    {
+        struct Destructor
+        {
+            void operator() (AFont* x) const
             {
-                // modify the previous glyph
-                int& glyphNumber = glyphs.getReference (glyphs.size() - 1);
-
-                // make sure this is not a three character ligature
-                if (glyphNumber < std::numeric_limits<jchar>::max())
-                {
-                    const unsigned int previousGlyph
-                        = static_cast<unsigned int> (glyphNumber) & ((1U << (sizeof (jchar) * 8U)) - 1U);
-                    const unsigned int thisGlyph
-                        = static_cast<unsigned int> (ch)          & ((1U << (sizeof (jchar) * 8U)) - 1U);
-
-                    glyphNumber = static_cast<int> ((thisGlyph << (sizeof (jchar) * 8U)) | previousGlyph);
-                    ch = 0;
-                }
+                if (x != nullptr)
+                    AFont_close (x);
             }
-           #endif
+        };
 
-            glyphs.add ((int) ch);
-            x += local;
-            xOffsets.add (x * referenceFontToUnits);
-        }
+        using AFontPtr = std::unique_ptr<AFont, Destructor>;
+
+        constexpr uint16_t testString[] { 't', 'e', 's', 't' };
+
+        auto* matcher = AFontMatcher_create();
+        const ScopeGuard freeMatcher { [&] { AFontMatcher_destroy (matcher); } };
+        const auto weight = font.isBold() ? AFONT_WEIGHT_BOLD : AFONT_WEIGHT_NORMAL;
+        const auto italic = font.isItalic();
+        AFontMatcher_setStyle (matcher, weight, italic);
+        return AFontPtr { AFontMatcher_match (matcher,
+                                              font.getTypefaceName().toRawUTF8(),
+                                              testString,
+                                              std::size (testString),
+                                              nullptr) };
     }
 
-    bool getOutlineForGlyph (int /*glyphNumber*/, Path& /*destPath*/) override
+    static StringArray findAllTypefaceNames()
     {
-        return false;
+        std::set<String> results;
+
+        for (const auto& family : SystemFontMap::getInstance().getFamilyNames())
+            results.insert (family);
+
+        StringArray s;
+
+        for (const auto& family : results)
+            s.add (family);
+
+        return s;
     }
 
-    EdgeTable* getEdgeTableForGlyph (int glyphNumber, const AffineTransform& t, float /*fontHeight*/) override
+    static StringArray findAllTypefaceStyles (const String& family)
     {
-       #if JUCE_STRING_UTF_TYPE <= 16
-        static_assert (sizeof (int) >= (sizeof (jchar) * 2), "Unable store two jni chars in one int");
+        std::vector<String> results;
 
-        // glyphNumber of zero is used to indicate that the last character was a ligature
-        if (glyphNumber == 0) return nullptr;
+        const auto systemStyles = SystemFontMap::getInstance().getStyles (family);
+        results.insert (results.end(), systemStyles.begin(), systemStyles.end());
 
-        jchar ch1 = (static_cast<unsigned int> (glyphNumber) >> 0)                     & ((1U << (sizeof (jchar) * 8U)) - 1U);
-        jchar ch2 = (static_cast<unsigned int> (glyphNumber) >> (sizeof (jchar) * 8U)) & ((1U << (sizeof (jchar) * 8U)) - 1U);
-       #else
-        jchar ch1 = glyphNumber, ch2 = 0;
-       #endif
-        Rectangle<int> bounds;
-        auto* env = getEnv();
+        std::set<String> unique;
+        StringArray s;
 
-        {
-            LocalRef<jobject> matrix (GraphicsHelpers::createMatrix (env, AffineTransform::scale (referenceFontToUnits).followedBy (t)));
+        for (const auto& style : results)
+            if (unique.insert (style).second)
+                s.add (style);
 
-            jboolean isCopy;
-            auto* buffer = env->GetCharArrayElements ((jcharArray) charArray.get(), &isCopy);
-
-            buffer[0] = ch1; buffer[1] = ch2;
-            env->ReleaseCharArrayElements ((jcharArray) charArray.get(), buffer, 0);
-
-            LocalRef<jobject> path (env->NewObject (AndroidPath, AndroidPath.constructor));
-            LocalRef<jobject> boundsF (env->NewObject (AndroidRectF, AndroidRectF.constructor));
-
-
-            env->CallVoidMethod (paint.get(), AndroidPaint.getCharsPath, charArray.get(), 0, (ch2 != 0 ? 2 : 1), 0.0f, 0.0f, path.get());
-
-            env->CallVoidMethod (path.get(), AndroidPath.computeBounds, boundsF.get(), 1);
-
-            env->CallBooleanMethod (matrix.get(), AndroidMatrix.mapRect, boundsF.get());
-
-            env->CallVoidMethod (boundsF.get(), AndroidRectF.roundOut, rect.get());
-
-            bounds = Rectangle<int>::leftTopRightBottom (env->GetIntField (rect.get(), AndroidRect.left) - 1,
-                                                         env->GetIntField (rect.get(), AndroidRect.top),
-                                                         env->GetIntField (rect.get(), AndroidRect.right) + 1,
-                                                         env->GetIntField (rect.get(), AndroidRect.bottom));
-
-            auto w = bounds.getWidth();
-            auto h = jmax (1, bounds.getHeight());
-
-            LocalRef<jobject> bitmapConfig (env->CallStaticObjectMethod (AndroidBitmapConfig, AndroidBitmapConfig.valueOf, javaString ("ARGB_8888").get()));
-            LocalRef<jobject> bitmap (env->CallStaticObjectMethod (AndroidBitmap, AndroidBitmap.createBitmap, w, h, bitmapConfig.get()));
-            LocalRef<jobject> canvas (env->NewObject (AndroidCanvas, AndroidCanvas.create, bitmap.get()));
-
-            env->CallBooleanMethod (matrix.get(), AndroidMatrix.postTranslate, (float) -bounds.getX(), (float) -bounds.getY());
-            env->CallVoidMethod (canvas.get(), AndroidCanvas.setMatrix, matrix.get());
-            env->CallVoidMethod (canvas.get(), AndroidCanvas.drawPath, path.get(), paint.get());
-
-            int requiredRenderArraySize = w * h;
-            if (requiredRenderArraySize > lastCachedRenderArraySize)
-            {
-                cachedRenderArray = GlobalRef (LocalRef<jobject> ((jobject) env->NewIntArray (requiredRenderArraySize)));
-                lastCachedRenderArraySize = requiredRenderArraySize;
-            }
-
-            env->CallVoidMethod (bitmap.get(), AndroidBitmap.getPixels, cachedRenderArray.get(), 0, w, 0, 0, w, h);
-            env->CallVoidMethod (bitmap.get(), AndroidBitmap.recycle);
-        }
-
-        EdgeTable* et = nullptr;
-
-        if (! bounds.isEmpty())
-        {
-            et = new EdgeTable (bounds);
-
-            jint* const maskDataElements = env->GetIntArrayElements ((jintArray) cachedRenderArray.get(), nullptr);
-            const jint* mask = maskDataElements;
-
-            for (int y = bounds.getY(); y < bounds.getBottom(); ++y)
-            {
-               #if JUCE_LITTLE_ENDIAN
-                const uint8* const lineBytes = ((const uint8*) mask) + 3;
-               #else
-                const uint8* const lineBytes = (const uint8*) mask;
-               #endif
-
-                et->clipLineToMask (bounds.getX(), y, lineBytes, 4, bounds.getWidth());
-                mask += bounds.getWidth();
-            }
-
-            env->ReleaseIntArrayElements ((jintArray) cachedRenderArray.get(), maskDataElements, 0);
-        }
-
-        return et;
+        return s;
     }
 
-    GlobalRef typeface, paint, rect, charArray, cachedRenderArray;
-    float ascent, descent, heightToPointsFactor;
-    int lastCachedRenderArraySize = -1;
+    static JUCE_INTRODUCED_IN_29 Ptr fromMatchedFont (AFont* matched, uint16_t weight, bool italic)
+    {
+        if (matched == nullptr)
+        {
+            // Unable to find any matching fonts. This should never happen - in the worst case,
+            // we should at least get a font with the tofu character.
+            jassertfalse;
+            return {};
+        }
+
+        const File matchedFile { AFont_getFontFilePath (matched) };
+        const auto matchedIndex = AFont_getCollectionIndex (matched);
+
+        auto face = loadCompatibleFont ({ matchedFile, (int) matchedIndex });
+
+        static const auto weightTag = FontFeatureTag::fromString ("wght");
+        static const auto italicTag = FontFeatureTag::fromString ("ital");
+
+        std::vector<FontVariableSetting> settings;
+
+        for (auto var : face->getSupportedVariables())
+        {
+            if (var == weightTag)
+                settings.emplace_back (weightTag, weight);
+
+            if (var == italicTag)
+                settings.emplace_back (italicTag, italic ? 1.0f : 0.0f);
+        }
+
+        return face->cloneWithVariableSettings (settings);
+    }
 
 private:
-    static File findFontFile (const String& family,
-                              const bool bold, const bool italic)
+    static JUCE_INTRODUCED_IN_29 Ptr findSystemTypefaceWithMatcher()
     {
-        File file;
-
-        if (bold || italic)
-        {
-            String suffix;
-            if (bold)   suffix = "Bold";
-            if (italic) suffix << "Italic";
-
-            file = getFontFile (family, suffix);
-
-            if (file.exists())
-                return file;
-        }
-
-        file = getFontFile (family, "Regular");
-
-        if (! file.exists())
-            file = getFontFile (family, String());
-
-        return file;
+        const auto afont = findAFontWithMatcher (FontOptions{}.withName ("system-ui"));
+        return fromMatchedFont (afont.get(), AFONT_WEIGHT_NORMAL, false);
     }
 
-    static File getFontFile (const String& family, const String& fontStyle)
+    JUCE_INTRODUCED_IN_29 Ptr matchWithAFontMatcher (const String& text, const String& language) const
     {
-        String path ("/system/fonts/" + family);
+        auto* matcher = AFontMatcher_create();
+        const ScopeGuard freeMatcher { [&] { AFontMatcher_destroy (matcher); } };
 
-        if (fontStyle.isNotEmpty())
-            path << '-' << fontStyle;
+        const auto weight = hb_style_get_value (native->getFont(), HB_STYLE_TAG_WEIGHT);
+        const auto italic = hb_style_get_value (native->getFont(), HB_STYLE_TAG_ITALIC) != 0.0f;
+        AFontMatcher_setStyle (matcher, (uint16_t) weight, italic);
 
-        return File (path + ".ttf");
+        AFontMatcher_setLocales (matcher, language.toRawUTF8());
+
+        const auto utf16 = text.toUTF16();
+
+        auto* matched = AFontMatcher_match (matcher,
+                                            getName().toRawUTF8(),
+                                            unalignedPointerCast<const uint16_t*> (utf16.getAddress()),
+                                            (uint32_t) (utf16.findTerminatingNull().getAddress() - utf16.getAddress()),
+                                            nullptr);
+        const ScopeGuard freeMatched { [&] { AFont_close (matched); } };
+
+        return fromMatchedFont (matched, (uint16_t) weight, italic);
     }
 
-    static LocalRef<jobject> getTypefaceFromAsset (const String& typefaceName)
+    static bool shouldStoreAndroidFont (hb_face_t* face)
+    {
+        return (hb_ot_color_has_svg (face) || hb_ot_color_has_paint (face))
+            && ! (hb_ot_color_has_layers (face) || hb_ot_color_has_png (face));
+    }
+
+    static GlobalRef makeAndroidFont (Span<const std::byte> blob,
+                                      unsigned int index,
+                                      Span<const FontVariableSetting> variables = {})
     {
         auto* env = getEnv();
 
-        LocalRef<jobject> assetManager (env->CallObjectMethod (getAppContext().get(), AndroidContext.getAssets));
-
-        if (assetManager == nullptr)
-            return LocalRef<jobject>();
-
-        auto assetTypeface = env->CallStaticObjectMethod (TypefaceClass, TypefaceClass.createFromAsset, assetManager.get(),
-                                                          javaString ("fonts/" + typefaceName).get());
-
-        // this may throw
-        if (env->ExceptionCheck() != 0)
+        LocalRef<jbyteArray> bytes { env->NewByteArray ((jint) blob.size()) };
         {
-            env->ExceptionClear();
-            return LocalRef<jobject>();
+            auto* elements = env->GetByteArrayElements (bytes, nullptr);
+            const ScopeGuard scope { [&] { env->ReleaseByteArrayElements (bytes, elements, 0); }};
+            std::transform (blob.begin(), blob.end(), elements, [] (auto x) { return (jbyte) x; });
         }
 
-        return LocalRef<jobject> (assetTypeface);
+        LocalRef<jobject> byteBuffer { env->CallStaticObjectMethod (JavaByteBuffer,
+                                                                    JavaByteBuffer.allocateDirect,
+                                                                    (jint) blob.size()) };
+        LocalRef { env->CallObjectMethod (byteBuffer, JavaByteBuffer.put, bytes.get()) };
+
+        LocalRef<jobject> builder { env->NewObject (AndroidFontBuilder,
+                                                    AndroidFontBuilder.create,
+                                                    byteBuffer.get()) };
+        LocalRef { env->CallObjectMethod (builder,
+                                          AndroidFontBuilder.setTtcIndex,
+                                          (jint) index) };
+
+        if (! variables.empty())
+        {
+            const auto androidVariableSettings = std::invoke ([variables]
+            {
+                String s;
+
+                for (const auto& variable : variables)
+                    s << "\'" << variable.tag.toString() << "\' " << variable.value << ", ";
+
+                return s.dropLastCharacters (2);
+            });
+
+            LocalRef { env->CallObjectMethod (builder,
+                                              AndroidFontBuilder.setFontVariationSettings,
+                                              javaString (androidVariableSettings).get()) };
+        }
+
+        LocalRef<jobject> androidFont { env->CallObjectMethod (builder,
+                                                               AndroidFontBuilder.build) };
+
+        return GlobalRef { androidFont };
     }
 
-    static File getCacheDirectory()
+    static Ptr loadCompatibleFont (const TypefaceFileAndIndex& key)
     {
-        static File result = []()
+        auto* cache = TypefaceFileCache::getInstance();
+
+        if (cache == nullptr)
+            return {}; // Perhaps we're shutting down
+
+        return cache->get (key, [] (auto info) -> Ptr
         {
-            auto appContext = getAppContext();
+            FileInputStream stream { info.file };
 
-            if (appContext != nullptr)
+            if (! stream.openedOk())
+                return {};
+
+            MemoryBlock mb;
+            stream.readIntoMemoryBlock (mb);
+
+            return fromMemory ({ static_cast<const std::byte*> (mb.getData()), mb.getSize() },
+                               (unsigned int) info.index);
+        });
+    }
+
+    class SystemFontMap
+    {
+    public:
+        static const SystemFontMap& getInstance()
+        {
+            static const auto result = std::invoke ([&]
             {
-                auto* env = getEnv();
+                const auto addFontInfo = [&] (SystemFontMap& sfm,
+                                              const TypefaceFileAndIndex& typefaceFileAndIndex)
+                {
+                    const auto face = loadCompatibleFont (typefaceFileAndIndex);
 
-                LocalRef<jobject> cacheFile (env->CallObjectMethod (appContext.get(), AndroidContext.getCacheDir));
-                LocalRef<jstring> jPath ((jstring) env->CallObjectMethod (cacheFile.get(), JavaFile.getAbsolutePath));
+                    auto& mapForFamily = sfm.map[face->getName()];
+                    mapForFamily.push_back ({ face->getStyle(), typefaceFileAndIndex });
 
-                return File (juceString (env, jPath.get()));
+                    for (const auto& instanceName : face->getInstanceNames())
+                        mapForFamily.push_back ({ instanceName, typefaceFileAndIndex });
+                };
+
+                if (__builtin_available (android 29, *))
+                {
+                    if (auto* iterator = ASystemFontIterator_open())
+                    {
+                        const ScopeGuard closeIterator { [&] { ASystemFontIterator_close (iterator); } };
+
+                        SystemFontMap sfm;
+
+                        while (auto* font = ASystemFontIterator_next (iterator))
+                        {
+                            const ScopeGuard closeFont { [&] { AFont_close (font); } };
+                            const File path { AFont_getFontFilePath (font) };
+                            const auto index = AFont_getCollectionIndex (font);
+                            addFontInfo (sfm, { path, (int) index });
+                        }
+
+                        return sfm;
+                    }
+                }
+
+                SystemFontMap sfm;
+
+                for (auto& f : File ("/system/fonts").findChildFiles (File::findFiles, false, "*.ttf"))
+                    addFontInfo (sfm, { f, 0 });
+
+                return sfm;
+            });
+
+            return result;
+        }
+
+        std::set<String> getFamilyNames() const
+        {
+            std::set<String> result;
+
+            for (const auto& pair : map)
+                result.insert (pair.first);
+
+            return result;
+        }
+
+        std::vector<String> getStyles (const String& family) const
+        {
+            const auto iter = map.find (family);
+
+            if (iter == map.end())
+                return {};
+
+            std::vector<String> result;
+
+            for (const auto& pair : iter->second)
+                result.push_back (pair.style);
+
+            return result;
+        }
+
+        TypefaceFileAndIndex getTypefaceFileAndIndex (const String& family,
+                                                      const String& style) const
+        {
+            const auto familyIter = map.find (family);
+
+            if (familyIter == map.end())
+                return {};
+
+            // If the requested style isn't present, try to find a standard style
+            for (const auto& styleToTry : { style, String ("Regular"), String() })
+            {
+                const auto styleIter = std::find_if (familyIter->second.begin(),
+                                                     familyIter->second.end(),
+                                                     [&] (const auto& p) { return p.style == styleToTry; });
+
+                if (styleIter != familyIter->second.end())
+                    return styleIter->fileAndIndex;
             }
 
+            // If the requested style and the regular style are not present, just get the first style
+            if (! familyIter->second.empty())
+                return familyIter->second.front().fileAndIndex;
+
+            // Somehow the cache contains a family name with no associated styles!
             jassertfalse;
-            return File();
-        }();
+            return {};
+        }
 
-        return result;
-    }
+    private:
+        SystemFontMap() = default;
 
-    static HashMap<String, File>& getInMemoryFontCache()
+        struct FileAndIndexForStyle
+        {
+            String style;
+            TypefaceFileAndIndex fileAndIndex;
+        };
+
+        std::map<String, std::vector<FileAndIndexForStyle>> map;
+    };
+
+    static Ptr fromMemory (Span<const std::byte> blob, unsigned int index)
     {
-        static HashMap<String, File> cache;
-        return cache;
+        auto hbFace = FontStyleHelpers::getFaceForBlob ({ reinterpret_cast<const char*> (blob.data()), blob.size() }, index);
+
+        if (hbFace == nullptr)
+            return {};
+
+        const auto metrics = findNonPortableMetricsForData (blob);
+        auto* face = hbFace.get();
+
+        return new AndroidTypeface (HbFont (hb_font_create (face), IncrementRef::no),
+                                    metrics,
+                                    shouldStoreAndroidFont (face) ? makeAndroidFont (blob, index) : GlobalRef{});
     }
 
-    static File getCacheFileForData (const void* data, size_t size)
+    AndroidTypeface (HbFont fontIn,
+                     TypefaceVerticalMetrics nonPortableMetricsIn,
+                     GlobalRef javaFontIn,
+                     std::shared_ptr<VariableAxisRegistry> variableAxisRegistry = {},
+                     std::vector<FontVariableSetting> settings = {})
+        : AndroidTypeface (std::make_unique<Native> (TypefaceNativeOptions { fontIn,
+                                                                             nonPortableMetricsIn,
+                                                                             std::move (settings),
+                                                                             this,
+                                                                             {},
+                                                                             variableAxisRegistry }),
+                           javaFontIn)
+    {
+    }
+
+    AndroidTypeface (std::unique_ptr<Native> nativeIn,
+                     GlobalRef javaFontIn)
+        : Typeface (nativeIn->getTypefaceName(), nativeIn->getTypefaceStyle()),
+          javaFont (std::move (javaFontIn)),
+          native (std::move (nativeIn))
+    {
+    }
+
+    struct BlobForFont
+    {
+        MemoryBlock data;
+        size_t collectionIndex;
+        TypefaceVerticalMetrics metrics;
+    };
+
+    static BlobForFont getBlobForFont (const Font& font)
+    {
+        auto memory = loadFontAsset (font.getTypefaceName());
+
+        if (! memory.isEmpty())
+            return { memory, 0, findNonPortableMetricsForAsset (font.getTypefaceName()) };
+
+        const auto [file, index] = findFontFileAndIndex (font);
+
+        if (! file.exists())
+        {
+            // Failed to find file corresponding to this font
+            jassertfalse;
+            return {};
+        }
+
+        FileInputStream stream { file };
+
+        MemoryBlock result;
+        stream.readIntoMemoryBlock (result);
+
+        return { stream.isExhausted() ? result : MemoryBlock{},
+                 (size_t) index,
+                 findNonPortableMetricsForFile (file) };
+    }
+
+    static TypefaceFileAndIndex findFontFileAndIndex (const Font& font)
+    {
+        // We deliberately *don't* just use AFontMatcher_match to try to find a font with the
+        // requested family name, since this function only works for 'generic' family names like
+        // sans-serif, serif, monospace, system-ui, and so on. Instead, we load all the system fonts
+        // and try to match the requested name and style.
+
+        const String styles[] { font.getTypefaceStyle(),
+                                FontStyleHelpers::getStyleName (font.isBold(), font.isItalic()),
+                                {} };
+
+        for (const auto& style : styles)
+        {
+            if (const auto pair = SystemFontMap::getInstance().getTypefaceFileAndIndex (font.getTypefaceName(), style);
+                pair.file.existsAsFile())
+            {
+                return pair;
+            }
+        }
+
+        return {};
+    }
+
+    static MemoryBlock loadFontAsset (const String& typefaceName)
+    {
+        auto* env = getEnv();
+
+        const LocalRef assetManager { env->CallObjectMethod (getAppContext().get(), AndroidContext.getAssets) };
+
+        if (assetManager == nullptr)
+            return {};
+
+        const LocalRef inputStream { env->CallObjectMethod (assetManager,
+                                                            AndroidAssetManager.open,
+                                                            javaString ("fonts/" + typefaceName).get()) };
+
+        // Opening an input stream for an asset might throw if the asset isn't found
+        jniCheckHasExceptionOccurredAndClear();
+
+        if (inputStream == nullptr)
+            return {};
+
+        auto streamWrapper = makeAndroidInputStreamWrapper (inputStream);
+
+        if (streamWrapper == nullptr)
+            return {};
+
+        MemoryBlock result;
+        streamWrapper->readIntoMemoryBlock (result);
+
+        return streamWrapper->isExhausted() ? result : MemoryBlock{};
+    }
+
+    static File getCacheFileForData (Span<const std::byte> data)
     {
         static CriticalSection cs;
+        static std::map<String, File> cache;
+
         JNIEnv* const env = getEnv();
 
-        String key;
+        const auto key = std::invoke ([&]
         {
-            LocalRef<jobject> digest (env->CallStaticObjectMethod (JavaMessageDigest, JavaMessageDigest.getInstance, javaString ("MD5").get()));
-            LocalRef<jbyteArray> bytes (env->NewByteArray ((int) size));
+            LocalRef digest (env->CallStaticObjectMethod (JavaMessageDigest, JavaMessageDigest.getInstance, javaString ("MD5").get()));
+            LocalRef bytes (env->NewByteArray ((int) data.size()));
 
             jboolean ignore;
             auto* jbytes = env->GetByteArrayElements (bytes.get(), &ignore);
-            memcpy (jbytes, data, size);
+            memcpy (jbytes, data.data(), data.size());
             env->ReleaseByteArrayElements (bytes.get(), jbytes, 0);
 
             env->CallVoidMethod (digest.get(), JavaMessageDigest.update, bytes.get());
-            LocalRef<jbyteArray> result ((jbyteArray) env->CallObjectMethod (digest.get(), JavaMessageDigest.digest));
-
+            LocalRef result ((jbyteArray) env->CallObjectMethod (digest.get(), JavaMessageDigest.digest));
             auto* md5Bytes = env->GetByteArrayElements (result.get(), &ignore);
-            key = String::toHexString (md5Bytes, env->GetArrayLength (result.get()), 0);
-            env->ReleaseByteArrayElements (result.get(), md5Bytes, 0);
-        }
+            const ScopeGuard scope { [&] { env->ReleaseByteArrayElements (result.get(), md5Bytes, 0); } };
 
-        ScopedLock lock (cs);
-        auto& mapEntry = getInMemoryFontCache().getReference (key);
+            return String::toHexString (md5Bytes, env->GetArrayLength (result.get()), 0);
+        });
+
+        const ScopedLock lock (cs);
+        auto& mapEntry = cache[key];
 
         if (mapEntry == File())
         {
-            mapEntry = getCacheDirectory().getChildFile ("bindata_" + key);
-            mapEntry.replaceWithData (data, size);
+            static const File cacheDirectory = std::invoke ([]
+            {
+                auto appContext = getAppContext();
+
+                if (appContext == nullptr)
+                    return File{};
+
+                auto* localEnv = getEnv();
+
+                LocalRef cacheFile (localEnv->CallObjectMethod (appContext.get(), AndroidContext.getCacheDir));
+                LocalRef jPath ((jstring) localEnv->CallObjectMethod (cacheFile.get(), JavaFile.getAbsolutePath));
+
+                return File (juceString (localEnv, jPath.get()));
+            });
+
+            mapEntry = cacheDirectory.getChildFile ("bindata_" + key);
+            mapEntry.replaceWithData (data.data(), data.size());
         }
 
         return mapEntry;
     }
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AndroidTypeface)
+    static TypefaceVerticalMetrics findNonPortableMetricsForFile (const File& file)
+    {
+        auto* env = getEnv();
+        const LocalRef typeface { env->CallStaticObjectMethod (TypefaceClass,
+                                                               TypefaceClass.createFromFile,
+                                                               javaString (file.getFullPathName()).get()) };
+        return findNonPortableMetricsForTypeface (typeface);
+    }
+
+    static TypefaceVerticalMetrics findNonPortableMetricsForData (Span<const std::byte> bytes)
+    {
+        const auto file = getCacheFileForData (bytes);
+        return findNonPortableMetricsForFile (file);
+    }
+
+    static TypefaceVerticalMetrics findNonPortableMetricsForAsset (const String& name)
+    {
+        auto* env = getEnv();
+
+        const LocalRef assetManager { env->CallObjectMethod (getAppContext().get(), AndroidContext.getAssets) };
+        const LocalRef typeface { env->CallStaticObjectMethod (TypefaceClass,
+                                                               TypefaceClass.createFromAsset,
+                                                               assetManager.get(),
+                                                               javaString ("fonts/" + name).get()) };
+        return findNonPortableMetricsForTypeface (typeface);
+    }
+
+    static TypefaceVerticalMetrics findNonPortableMetricsForTypeface (const LocalRef<jobject>& typeface)
+    {
+        constexpr auto referenceFontSize = 256.0f;
+
+        auto* env = getEnv();
+
+        jint constructorFlags = 1 /*ANTI_ALIAS_FLAG*/
+                              | 2 /*FILTER_BITMAP_FLAG*/
+                              | 4 /*DITHER_FLAG*/
+                              | 128 /*SUBPIXEL_TEXT_FLAG*/;
+
+        const LocalRef paint { env->NewObject (AndroidPaint, AndroidPaint.constructor, constructorFlags) };
+
+        LocalRef { env->CallObjectMethod (paint, AndroidPaint.setTypeface, typeface.get()) };
+        env->CallVoidMethod (paint, AndroidPaint.setTextSize, referenceFontSize);
+
+        const auto fullAscent  = std::abs (env->CallFloatMethod (paint, AndroidPaint.ascent));
+        const auto fullDescent = std::abs (env->CallFloatMethod (paint, AndroidPaint.descent));
+
+        return TypefaceVerticalMetrics { fullAscent  / referenceFontSize,
+                                         fullDescent / referenceFontSize,
+                                         0.0f };
+    }
+
+    std::vector<GlyphLayer> getFallbackColourGlyphLayers (int glyph,
+                                                          const AffineTransform& transform) const override
+    {
+        // Canvas.drawGlyphs is only available from API 31
+        if (getAndroidSDKVersion() < 31)
+            return {};
+
+        auto* env = getEnv();
+
+        const auto extents = native->getGlyphExtents ((hb_codepoint_t) glyph);
+
+        if (! extents.has_value())
+        {
+            // Trying to retrieve an image for a glyph that's not present in the font?
+            jassertfalse;
+            return {};
+        }
+
+        const auto upem = (jint) hb_face_get_upem (hb_font_get_face (native->getFont()));
+        constexpr jint referenceSize = 128;
+
+        const jint pixelW = (referenceSize * abs (extents->width))  / upem;
+        const jint pixelH = (referenceSize * abs (extents->height)) / upem;
+        const jint pixelBearingX = (referenceSize * extents->x_bearing) / upem;
+        const jint pixelBearingY = (referenceSize * extents->y_bearing) / upem;
+
+        const jint pixelPadding = 2;
+
+        const auto totalW = (size_t) (pixelW + pixelPadding * 2);
+        const auto totalH = (size_t) (pixelH + pixelPadding * 2);
+
+        LocalRef<jobject> bitmapConfig { env->CallStaticObjectMethod (AndroidBitmapConfig,
+                                                                      AndroidBitmapConfig.valueOf,
+                                                                      javaString ("ARGB_8888").get()) };
+
+        LocalRef<jobject> bitmap { env->CallStaticObjectMethod (AndroidBitmap,
+                                                                AndroidBitmap.createBitmap,
+                                                                totalW,
+                                                                totalH,
+                                                                bitmapConfig.get()) };
+
+        LocalRef<jobject> canvas { env->NewObject (AndroidCanvas, AndroidCanvas.create, bitmap.get())};
+
+        const jint glyphIdsIn[] { glyph };
+        LocalRef<jintArray> glyphIds { env->NewIntArray (std::size (glyphIdsIn)) };
+        env->SetIntArrayRegion (glyphIds, 0, std::size (glyphIdsIn), glyphIdsIn);
+
+        const jfloat pos[] { (float) (pixelPadding - pixelBearingX),
+                             (float) (pixelPadding + pixelBearingY) };
+        LocalRef<jfloatArray> positions { env->NewFloatArray (std::size (pos)) };
+        env->SetFloatArrayRegion (positions, 0, std::size (pos), pos);
+
+        LocalRef<jobject> paint { env->NewObject (AndroidPaint, AndroidPaint.defaultConstructor) };
+        env->CallVoidMethod (paint, AndroidPaint.setTextSize, (jfloat) referenceSize);
+
+        env->CallVoidMethod (canvas,
+                             AndroidCanvas31.drawGlyphs,
+                             glyphIds.get(),
+                             0,
+                             positions.get(),
+                             0,
+                             (jint) std::size (glyphIdsIn),
+                             javaFont.get(),
+                             paint.get());
+
+        LocalRef<jintArray> pixels { env->NewIntArray ((jint) totalW * (jint) totalH) };
+        env->CallVoidMethod (bitmap,
+                             AndroidBitmap.getPixels,
+                             pixels.get(),
+                             0,
+                             totalW,
+                             0,
+                             0,
+                             totalW,
+                             totalH);
+
+        auto* colours = env->GetIntArrayElements (pixels, nullptr);
+
+        ScopeGuard scope { [&] { env->ReleaseIntArrayElements (pixels, colours, JNI_ABORT); } };
+
+        Image resultImage { Image::ARGB, (int) totalW, (int) totalH, false };
+
+        // This image will be upside-down, but we'll use the final transform to flip it
+        {
+            Image::BitmapData bitmapData { resultImage, Image::BitmapData::writeOnly };
+
+            for (size_t y = 0; y < totalH; ++y)
+            {
+                for (size_t x = 0; x < totalW; ++x)
+                {
+                    bitmapData.setPixelColour ((int) x,
+                                               (int) y,
+                                               Colour ((uint32) colours[x + y * totalW]));
+                }
+            }
+        }
+
+        const auto scaleFactor = (float) upem / (float) referenceSize;
+        return { GlyphLayer { ImageLayer { resultImage,
+                                           AffineTransform::translation ((float) pixelBearingX,
+                                                                         (float) -pixelBearingY)
+                                               .scaled (scaleFactor, -scaleFactor)
+                                               .followedBy (transform) } } };
+    }
+
+    GlobalRef javaFont;
+    std::unique_ptr<Native> native;
 };
 
 //==============================================================================
-Typeface::Ptr Typeface::createSystemTypefaceFor (const Font& font)
+auto Typeface::createFromFontImpl (const Font& font) -> Ptr
 {
-    return new AndroidTypeface (font);
+    return AndroidTypeface::from (font);
 }
 
-Typeface::Ptr Typeface::createSystemTypefaceFor (const void* data, size_t size)
+auto Typeface::createFromDataImpl (Span<const std::byte> data) -> Ptr
 {
-    return new AndroidTypeface (data, size);
+    return AndroidTypeface::from (data);
+}
+
+auto Typeface::findSystemTypeface() -> Ptr
+{
+    return AndroidTypeface::findSystemTypeface();
 }
 
 void Typeface::scanFolderForFonts (const File&)
 {
-    jassertfalse; // not available unless using FreeType
+    jassertfalse; // not currently available
 }
 
-bool TextLayout::createNativeLayout (const AttributedString&)
+//==============================================================================
+StringArray Font::findAllTypefaceNamesImpl()
 {
-    return false;
+    return AndroidTypeface::findAllTypefaceNames();
 }
 
-#endif
+StringArray Font::findAllTypefaceStylesImpl (const String& family)
+{
+    return AndroidTypeface::findAllTypefaceStyles (family);
+}
+
+Typeface::Ptr Font::Native::getDefaultPlatformTypefaceForFont (const Font& font)
+{
+    const auto faceName = font.getTypefaceName();
+
+    const auto idealFace = std::invoke ([&]() -> Typeface::Ptr
+    {
+        if (__builtin_available (android 29, *))
+        {
+            const auto nameToFind = std::invoke ([&]
+            {
+                if (faceName == Font::getDefaultSansSerifFontName())  return "sans-serif";
+                if (faceName == Font::getDefaultSerifFontName())      return "serif";
+                if (faceName == Font::getDefaultMonospacedFontName()) return "monospace";
+                return "";
+            });
+
+            if (strlen (nameToFind) == 0)
+                return nullptr;
+
+            auto copy = font;
+            copy.setTypefaceName (nameToFind);
+            const auto afont = AndroidTypeface::findAFontWithMatcher (copy);
+            const auto weight = font.isBold() ? AFONT_WEIGHT_BOLD : AFONT_WEIGHT_NORMAL;
+            const auto italic = font.isItalic();
+
+            return AndroidTypeface::fromMatchedFont (afont.get(), weight, italic);
+        }
+
+        return nullptr;
+    });
+
+    if (idealFace != nullptr)
+        return idealFace;
+
+    Font f (font);
+    f.setTypefaceName (std::invoke ([&]() -> String
+    {
+        if (faceName == Font::getDefaultSansSerifFontName())    return "Roboto";
+        if (faceName == Font::getDefaultSerifFontName())        return "Roboto";
+        if (faceName == Font::getDefaultMonospacedFontName())   return "Roboto";
+
+        return faceName;
+    }));
+
+    return Typeface::createSystemTypefaceFor (f);
+}
 
 } // namespace juce

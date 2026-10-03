@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -39,6 +48,10 @@ namespace ReturnHelpers
 #define JUCE_GENERATE_FUNCTION_WITH_DEFAULT(functionName, objectName, args, returnType) \
     using functionName      = returnType (*) args; \
     functionName objectName = [] args -> returnType  { return ReturnHelpers::returnDefaultConstructedAnyType<returnType>(); };
+
+#define JUCE_GENERATE_FUNCTION_WITH_DEFAULT_RESULT(functionName, objectName, args, returnType, defaultResult) \
+    using functionName      = returnType (*) args; \
+    functionName objectName = [] args -> returnType  { return defaultResult; };
 
 
 //==============================================================================
@@ -209,6 +222,10 @@ public:
                                          (::Display*, Colormap),
                                          void)
 
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XFreeEventData, xFreeEventData,
+                                         (::Display*, XGenericEventCookie*),
+                                         void)
+
     JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XFreeGC, xFreeGC,
                                          (::Display*, GC),
                                          void)
@@ -232,6 +249,10 @@ public:
     JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XGetErrorText, xGetErrorText,
                                          (::Display*, int, const char*, int),
                                          void)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XGetEventData, xGetEventData,
+                                         (::Display*, XGenericEventCookie*),
+                                         Bool)
 
     JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XGetGeometry, xGetGeometry,
                                          (::Display*, ::Drawable, ::Window*, int*, int*, unsigned int*, unsigned int*, unsigned int*, unsigned int*),
@@ -301,6 +322,38 @@ public:
                                          (::Display*, const char*, Bool),
                                          Atom)
 
+   #if JUCE_USE_XINPUT
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT_RESULT (XIQueryVersion, xiQueryVersion,
+                                                (::Display*, int*, int*),
+                                                Status,
+                                                BadRequest)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XIQueryDevice, xiQueryDevice,
+                                         (::Display*, int, int*),
+                                         XIDeviceInfo*)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XIFreeDeviceInfo, xiFreeDeviceInfo,
+                                         (XIDeviceInfo*),
+                                         void)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XISelectEvents, xiSelectEvents,
+                                         (::Display*, ::Window, XIEventMask*, int),
+                                         Status)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XIGetClientPointer, xiGetClientPointer,
+                                         (::Display*, ::Window, int*),
+                                         Bool)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT_RESULT (XIGrabDevice, xiGrabDevice,
+                                                (::Display*, int, ::Window, ::Time, Cursor, int, int, Bool, XIEventMask*),
+                                                Status,
+                                                BadRequest)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XIUngrabDevice, xiUngrabDevice,
+                                         (::Display*, int, ::Time),
+                                         Status)
+   #endif
+
     JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XkbKeycodeToKeysym, xkbKeycodeToKeysym,
                                          (::Display*, KeyCode, unsigned int, unsigned int),
                                          KeySym)
@@ -336,6 +389,10 @@ public:
     JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XNextEvent, xNextEvent,
                                          (::Display*, XEvent*),
                                          int)
+
+    JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XNextRequest, xNextRequest,
+                                         (::Display*),
+                                         unsigned long)
 
     JUCE_GENERATE_FUNCTION_WITH_DEFAULT (XOpenDisplay, xOpenDisplay,
                                          (const char*),
@@ -587,7 +644,7 @@ public:
    #endif
 
     //==============================================================================
-    JUCE_DECLARE_SINGLETON (X11Symbols, false)
+    JUCE_DECLARE_SINGLETON_INLINE (X11Symbols, false)
 
 private:
     X11Symbols() = default;
@@ -611,6 +668,9 @@ private:
    #endif
    #if JUCE_USE_XRANDR
     DynamicLibrary xrandrLib   { "libXrandr.so.2" };
+   #endif
+   #if JUCE_USE_XINPUT
+    DynamicLibrary xinputLib   { "libXi.so.6" };
    #endif
 
     //==============================================================================

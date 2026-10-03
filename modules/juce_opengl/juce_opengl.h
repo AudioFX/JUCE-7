@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -35,18 +44,17 @@
 
   ID:                 juce_opengl
   vendor:             juce
-  version:            7.0.12
+  version:            9.0.3
   name:               JUCE OpenGL classes
   description:        Classes for rendering OpenGL in a JUCE window.
   website:            http://www.juce.com/juce
-  license:            GPL/Commercial
+  license:            AGPLv3/Commercial
   minimumCppStandard: 17
 
   dependencies:       juce_gui_extra
   OSXFrameworks:      OpenGL
   iOSFrameworks:      OpenGLES
-  linuxPackages:      gl
-  mingwLibs:          opengl32
+  linuxPackages:      egl gl
 
  END_JUCE_MODULE_DECLARATION
 
@@ -61,11 +69,41 @@
 #undef JUCE_OPENGL
 #define JUCE_OPENGL 1
 
+//==============================================================================
+// iOS and Android only provide OpenGL ES
 #if JUCE_IOS || JUCE_ANDROID
- #define JUCE_OPENGL_ES 1
- #include "opengl/juce_gles2.h"
+ #ifndef JUCE_OPENGL_ES
+  #define JUCE_OPENGL_ES 1
+ #endif
+#endif
+
+/** Config: JUCE_OPENGL_ES
+    Builds juce_opengl against OpenGL ES rather than desktop OpenGL.
+
+    This is only a choice on Linux and BSD, for systems whose graphics drivers only
+    provide OpenGL ES, such as many embedded Arm boards. It is always enabled on iOS
+    and Android and cannot be enabled on macOS or Windows.
+
+    Building against OpenGL ES requires linking libGLESv2 rather than libGL. With
+    CMake, enable it with the NEEDS_OPENGL_ES target option rather than by defining
+    this macro, since that option also links the right libraries. In the Projucer,
+    enable the module flag, or add JUCE_OPENGL_ES=1 to the preprocessor definitions
+    of a Linux exporter when the project also targets other platforms.
+*/
+#ifndef JUCE_OPENGL_ES
+ #define JUCE_OPENGL_ES 0
+#endif
+
+#if (JUCE_IOS || JUCE_ANDROID) && ! JUCE_OPENGL_ES
+ #error "OpenGL ES is the only OpenGL API available on this platform"
+#elif (JUCE_MAC || JUCE_WINDOWS) && JUCE_OPENGL_ES
+ #error "OpenGL ES is not available on this platform"
+#endif
+
+#if JUCE_OPENGL_ES
+#include "opengl/juce_gles2.h"
 #else
- #include "opengl/juce_gl.h"
+#include "opengl/juce_gl.h"
 #endif
 
 #include <juce_gui_extra/juce_gui_extra.h>

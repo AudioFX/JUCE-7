@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -125,7 +134,9 @@ private:
     //==============================================================================
     String getMachineInfoToDisplay() const
     {
-        auto* display = Desktop::getInstance().getDisplays().getDisplayForPoint (getScreenBounds().getCentre());
+        const auto screenBounds = getScreenBounds().toFloat();
+        const auto& displays = Desktop::getInstance().getDisplays();
+        const auto* display = displays.getDisplayForPoint (screenBounds.getCentre());
         return getOSName() + "   " + String (display->dpi) + "   "  + String (display->scale);
     }
 
@@ -155,14 +166,14 @@ private:
         if (clientArea.isEmpty())
         {
             g.setColour (Colours::red.withAlpha (0.5f));
-            g.setFont (20.0f);
+            g.setFont (FontOptions (20.0f));
             g.drawText ("Not Connected", getLocalBounds(), Justification::centred, false);
             return;
         }
 
         canvas.draw (g, getLocalBounds().toFloat(), clientArea);
 
-        g.setFont (Font (34.0f));
+        g.setFont (FontOptions (34.0f));
         g.setColour (Colours::white.withAlpha (0.6f));
 
         g.drawText (getMachineInfoToDisplay(),
@@ -181,9 +192,10 @@ private:
     {
         if (auto client = canvas.findClient (clientName))
         {
-            auto screenBounds = getScreenBounds();
-            auto* display = Desktop::getInstance().getDisplays().getDisplayForPoint (screenBounds.getCentre());
-            return ((screenBounds - display->userArea.getCentre()).toFloat() / (client->scaleFactor * display->dpi / display->scale)) + client->centre;
+            const auto screenBounds = getScreenBounds().toFloat();
+            const auto& displays = Desktop::getInstance().getDisplays();
+            const auto* display = displays.getDisplayForPoint (screenBounds.getCentre());
+            return ((screenBounds - display->userBounds.getCentre()) / (client->scaleFactor * display->dpi / display->scale)) + client->centre;
         }
 
         return {};
@@ -193,8 +205,10 @@ private:
     {
         if (auto client = canvas.findClient (clientName))
         {
-            auto* display = Desktop::getInstance().getDisplays().getDisplayForPoint (getScreenBounds().getCentre());
-            return (display->userArea.toFloat() / (client->scaleFactor * display->dpi / display->scale)).withCentre (client->centre);
+            const auto screenBounds = getScreenBounds().toFloat();
+            const auto& displays = Desktop::getInstance().getDisplays();
+            const auto* display = displays.getDisplayForPoint (screenBounds.getCentre());
+            return (display->userBounds / (client->scaleFactor * display->dpi / display->scale)).withCentre (client->centre);
         }
 
         return {};

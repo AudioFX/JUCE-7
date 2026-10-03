@@ -1,24 +1,33 @@
 /*
   ==============================================================================
 
-   This file is part of the JUCE library.
-   Copyright (c) 2022 - Raw Material Software Limited
+   This file is part of the JUCE framework.
+   Copyright (c) Raw Material Software Limited
 
-   JUCE is an open source library subject to commercial or open-source
+   JUCE is an open source framework subject to commercial or open source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
-   Agreement and JUCE Privacy Policy.
+   By downloading, installing, or using the JUCE framework, or combining the
+   JUCE framework with any other source code, object code, content or any other
+   copyrightable work, you agree to the terms of the JUCE End User Licence
+   Agreement, and all incorporated terms including the JUCE Privacy Policy and
+   the JUCE Website Terms of Service, as applicable, which will bind you. If you
+   do not agree to the terms of these agreements, we will not license the JUCE
+   framework to you, and you must discontinue the installation or download
+   process and cease use of the JUCE framework.
 
-   End User License Agreement: www.juce.com/juce-7-licence
-   Privacy Policy: www.juce.com/juce-privacy-policy
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
+   JUCE Privacy Policy: https://juce.com/juce-privacy-policy
+   JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
-   Or: You may also use this code under the terms of the GPL v3 (see
-   www.gnu.org/licenses).
+   Or:
 
-   JUCE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
-   EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
-   DISCLAIMED.
+   You may also use this code under the terms of the AGPLv3:
+   https://www.gnu.org/licenses/agpl-3.0.en.html
+
+   THE JUCE FRAMEWORK IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL
+   WARRANTIES, WHETHER EXPRESSED OR IMPLIED, INCLUDING WARRANTY OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED.
 
   ==============================================================================
 */
@@ -41,6 +50,11 @@ extern "C" GLvoid glResolveMultisampleFramebufferAPPLE();
 namespace juce
 {
 
+bool OpenGLHelpers::isOpenGLES()
+{
+    return true;
+}
+
 class OpenGLContext::NativeContext
 {
 public:
@@ -48,11 +62,18 @@ public:
                    const OpenGLPixelFormat& pixFormat,
                    void* contextToShare,
                    bool multisampling,
-                   OpenGLVersion version)
-        : component (c), openGLversion (version),
+                   [[maybe_unused]] API apiIn,
+                   Version versionIn,
+                   [[maybe_unused]] Profile profileIn)
+        : component (c),
           useDepthBuffer (pixFormat.depthBufferBits > 0),
           useMSAA (multisampling)
     {
+        // Only OpenGL ES is supported on iOS
+        jassert (apiIn == OpenGLAPI::openGLES);
+        // Only core profile is supported on iOS
+        jassert (profileIn == OpenGLProfile::core);
+
         JUCE_AUTORELEASEPOOL
         {
             if (auto* peer = component.getPeer())
@@ -68,11 +89,11 @@ public:
                 glLayer = (CAEAGLLayer*) [view layer];
                 glLayer.opaque = true;
 
-                updateWindowPosition (bounds);
+                updateWindowPosition();
 
                 [((UIView*) peer->getNativeHandle()) addSubview: view];
 
-                const auto shouldUseES3 = version != defaultGLVersion
+                const auto shouldUseES3 = versionIn >= Version { 3, 0 }
                                        && [[UIDevice currentDevice].systemVersion floatValue] >= 7.0;
 
                 [[maybe_unused]] const auto gotContext = (shouldUseES3 && createContext (kEAGLRenderingAPIOpenGLES3, contextToShare))
@@ -86,6 +107,7 @@ public:
                     // so causes mysterious timing-related failures.
                     [EAGLContext setCurrentContext: context.get()];
                     gl::loadFunctions();
+                    openGLVersion = getOpenGLVersion();
                     createGLBuffers();
                     deactivateCurrentContext();
                 }
@@ -148,10 +170,10 @@ public:
             glBindFramebuffer (GL_DRAW_FRAMEBUFFER, frameBufferHandle);
             glBindFramebuffer (GL_READ_FRAMEBUFFER, msaaBufferHandle);
 
-            if (openGLversion >= openGL3_2)
+            if (openGLVersion >= Version { 3, 0 })
             {
-                auto w = roundToInt (lastBounds.getWidth()  * glLayer.contentsScale);
-                auto h = roundToInt (lastBounds.getHeight() * glLayer.contentsScale);
+                const auto w = lastBounds.getWidth();
+                const auto h = lastBounds.getHeight();
 
                 glBlitFramebuffer (0, 0, w, h,
                                    0, 0, w, h,
@@ -167,27 +189,28 @@ public:
         glBindRenderbuffer (GL_RENDERBUFFER, colorBufferHandle);
         [context.get() presentRenderbuffer: GL_RENDERBUFFER];
 
-        if (needToRebuildBuffers)
-        {
-            needToRebuildBuffers = false;
+        if (! std::exchange (needToRebuildBuffers, false))
+            return;
 
-            freeGLBuffers();
-            createGLBuffers();
-            makeActive();
-        }
+        freeGLBuffers();
+        createGLBuffers();
+        makeActive();
     }
 
-    void updateWindowPosition (Rectangle<int> bounds)
+    void updateWindowPosition()
     {
+        auto* peer = component.getTopLevelComponent()->getPeer();
+
+        if (peer == nullptr)
+            return;
+
+        const auto bounds = peer->getAreaCoveredBy (component);
         view.frame = convertToCGRect (bounds);
         glLayer.contentsScale = (CGFloat) (Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale
                                             / component.getDesktopScaleFactor());
 
-        if (lastBounds != bounds)
-        {
-            lastBounds = bounds;
-            needToRebuildBuffers = true;
-        }
+        const auto msaaBounds = bounds * glLayer.contentsScale;
+        needToRebuildBuffers |= std::exchange (lastBounds, msaaBounds) != msaaBounds;
     }
 
     bool setSwapInterval (int numFramesPerSwap) noexcept
@@ -210,7 +233,7 @@ private:
     JuceGLView* view = nil;
     CAEAGLLayer* glLayer = nil;
     NSUniquePtr<EAGLContext> context;
-    const OpenGLVersion openGLversion;
+    Version openGLVersion{};
     const bool useDepthBuffer, useMSAA;
 
     GLuint frameBufferHandle = 0, colorBufferHandle = 0, depthBufferHandle = 0,
