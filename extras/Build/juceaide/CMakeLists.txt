@@ -102,6 +102,19 @@ else()
         set(ENV{CMAKE_GENERATOR_PLATFORM} "${CMAKE_HOST_SYSTEM_PROCESSOR}")
     endif()
 
+    # juceaide is a host tool, and this nested configure does not inherit the
+    # outer project's deployment target, so it defaulted to the host's macOS.
+    # On a macOS 15 host with the macOS 15 SDK that makes
+    # CGWindowListCreateImage (juce_Windowing_mac.mm) unavailable rather than
+    # merely deprecated - it is obsoleted at a deployment target of 15.0 -
+    # and the tool fails to compile. 11.0 is the lowest target an arm64 host
+    # supports.
+    set(juceaide_host_arguments)
+
+    if(CMAKE_HOST_APPLE)
+        list(APPEND juceaide_host_arguments "-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
+    endif()
+
     # Looks like we're bootstrapping, reinvoke CMake
     execute_process(COMMAND "${CMAKE_COMMAND}"
             "."
@@ -112,6 +125,7 @@ else()
             "-DJUCE_BUILD_HELPER_TOOLS=ON"
             "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
             ${extra_compiler_flag_arguments}
+            ${juceaide_host_arguments}
         WORKING_DIRECTORY "${JUCE_SOURCE_DIR}"
         OUTPUT_VARIABLE command_output
         ERROR_VARIABLE command_output
